@@ -15,7 +15,6 @@ import {
 import { AssistantMessage } from "./AssistantMessage.js";
 import { ChatComposer, DraftPersistence } from "./ChatComposer.js";
 import { EditComposer } from "./EditComposer.js";
-import { IndexerIndicator } from "./IndexerIndicator.js";
 import { ReconnectStreamView } from "./ReconnectStreamView.js";
 import { UserMessage } from "./UserMessage.js";
 
@@ -125,7 +124,6 @@ export function ChatThread({
 						<ChevronDown className="h-4 w-4" />
 					</ThreadPrimitive.ScrollToBottom>
 
-					<IndexerIndicator conversationId={conversationId} />
 					<ChatComposer />
 				</ThreadPrimitive.Root>
 			</div>

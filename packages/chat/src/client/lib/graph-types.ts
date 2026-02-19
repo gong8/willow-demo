@@ -16,7 +16,7 @@ export interface WillowNodeHistory {
 
 export interface WillowNode {
 	id: string;
-	node_type: "root" | "category" | "detail";
+	node_type: "root" | "category" | "collection" | "entity" | "attribute" | "event" | "detail";
 	content: string;
 	parent_id: string | null;
 	children: string[];
@@ -67,7 +67,7 @@ export interface GraphStats {
 	relationTypes: string[];
 }
 
-export type NodeType = "root" | "category" | "detail";
+export type NodeType = "root" | "category" | "collection" | "entity" | "attribute" | "event" | "detail";
 export type LayoutType =
 	| "forceDirected2d"
 	| "circular2d"

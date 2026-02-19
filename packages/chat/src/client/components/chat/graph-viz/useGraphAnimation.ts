@@ -4,9 +4,10 @@ import type { AnimationPhase } from "./types.js";
 const PHASE_INTERVAL_MS = 150;
 
 interface AnimationState {
-	activeNodeIds: string[];
-	activeEdgeIds: string[];
-	selectedNodeIds: string[];
+	activeNodeIds: Set<string>;
+	activeEdgeIds: Set<string>;
+	selectedNodeIds: Set<string>;
+	done: boolean;
 }
 
 export function useGraphAnimation(phases: AnimationPhase[]): AnimationState {
@@ -33,13 +34,20 @@ export function useGraphAnimation(phases: AnimationPhase[]): AnimationState {
 	}, [phases]);
 
 	if (phases.length === 0) {
-		return { activeNodeIds: [], activeEdgeIds: [], selectedNodeIds: [] };
+		return {
+			activeNodeIds: new Set(),
+			activeEdgeIds: new Set(),
+			selectedNodeIds: new Set(),
+			done: true,
+		};
 	}
 
-	const current = phases[Math.min(phaseIndex, phases.length - 1)];
+	const idx = Math.min(phaseIndex, phases.length - 1);
+	const current = phases[idx];
 	return {
-		activeNodeIds: current.activeNodeIds,
-		activeEdgeIds: current.activeEdgeIds,
-		selectedNodeIds: current.selectedNodeIds,
+		activeNodeIds: new Set(current.activeNodeIds),
+		activeEdgeIds: new Set(current.activeEdgeIds),
+		selectedNodeIds: new Set(current.selectedNodeIds),
+		done: idx >= phases.length - 1,
 	};
 }

@@ -11,13 +11,21 @@ import type {
 export const NODE_COLORS: Record<NodeType, string> = {
 	root: "#6366f1",
 	category: "#8b5cf6",
-	detail: "#06b6d4",
+	collection: "#a78bfa",
+	entity: "#f59e0b",
+	attribute: "#06b6d4",
+	event: "#22c55e",
+	detail: "#94a3b8",
 };
 
 export const NODE_SIZES: Record<NodeType, number> = {
 	root: 12,
 	category: 8,
-	detail: 5,
+	collection: 7,
+	entity: 6,
+	attribute: 5,
+	event: 5,
+	detail: 3,
 };
 
 export const LINK_COLORS: Record<string, string> = {

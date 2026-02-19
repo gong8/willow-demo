@@ -2,6 +2,10 @@ import type { ThreadHistoryAdapter } from "@assistant-ui/react";
 import type { QueryClient } from "@tanstack/react-query";
 import { useMemo } from "react";
 import { type ToolCallData, fetchMessages } from "../lib/api.js";
+import type {
+	IndexerResultsPart,
+	SearchResultsPart,
+} from "../lib/chat-adapter.js";
 
 export function useChatHistory(
 	conversationId: string,
@@ -26,6 +30,8 @@ export function useChatHistory(
 									result?: string;
 									isError?: boolean;
 							  }
+							| SearchResultsPart
+							| IndexerResultsPart
 						> = [];
 
 						if (m.attachments && m.attachments.length > 0) {
@@ -40,15 +46,54 @@ export function useChatHistory(
 						if (m.toolCalls) {
 							try {
 								const toolCalls: ToolCallData[] = JSON.parse(m.toolCalls);
+
+								// Group tool calls by phase
+								const searchCalls: SearchResultsPart["toolCalls"] = [];
+								const indexerCalls: IndexerResultsPart["toolCalls"] = [];
+
 								for (const tc of toolCalls) {
+									if (tc.phase === "search") {
+										searchCalls.push({
+											toolCallId: tc.toolCallId,
+											toolName: tc.toolName,
+											args: tc.args,
+											result: tc.result,
+											isError: tc.isError,
+										});
+									} else if (tc.phase === "indexer") {
+										indexerCalls.push({
+											toolCallId: tc.toolCallId,
+											toolName: tc.toolName,
+											args: tc.args,
+											result: tc.result,
+											isError: tc.isError,
+										});
+									} else {
+										contentParts.push({
+											type: "tool-call",
+											toolCallId: tc.toolCallId,
+											toolName: tc.toolName,
+											args: tc.args,
+											argsText: JSON.stringify(tc.args),
+											result: tc.result,
+											isError: tc.isError,
+										});
+									}
+								}
+
+								if (searchCalls.length > 0) {
 									contentParts.push({
-										type: "tool-call",
-										toolCallId: tc.toolCallId,
-										toolName: tc.toolName,
-										args: tc.args,
-										argsText: JSON.stringify(tc.args),
-										result: tc.result,
-										isError: tc.isError,
+										type: "search-results",
+										searchStatus: "done",
+										toolCalls: searchCalls,
+									});
+								}
+
+								if (indexerCalls.length > 0) {
+									contentParts.push({
+										type: "indexer-results",
+										indexerStatus: "done",
+										toolCalls: indexerCalls,
 									});
 								}
 							} catch {

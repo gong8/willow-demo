@@ -37,3 +37,17 @@
 		margin: 0;
 	}
 }
+
+/* Inline code styling — background distinguishes it from surrounding text */
+.prose :where(code):not(:where(pre, pre *) *) {
+	background-color: oklch(0.92 0.004 285.823);
+	padding: 0.125rem 0.375rem;
+	border-radius: 0.25rem;
+	font-weight: 500;
+}
+
+/* Remove default backtick pseudo-elements — background style replaces them */
+.prose :where(code):not(:where(pre, pre *) *)::before,
+.prose :where(code):not(:where(pre, pre *) *)::after {
+	content: none;
+}

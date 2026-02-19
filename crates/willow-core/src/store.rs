@@ -501,6 +501,44 @@ mod tests {
     }
 
     #[test]
+    fn test_create_new_node_types() {
+        let mut store = temp_store();
+        let cat = store
+            .create_node("root", "category", "Education", None, None)
+            .unwrap();
+        assert_eq!(cat.node_type, NodeType::Category);
+
+        let entity = store
+            .create_node(&cat.id.0, "entity", "Imperial College London", None, None)
+            .unwrap();
+        assert_eq!(entity.node_type, NodeType::Entity);
+
+        let attr = store
+            .create_node(&entity.id.0, "attribute", "BEng Mathematics and CS", None, None)
+            .unwrap();
+        assert_eq!(attr.node_type, NodeType::Attribute);
+
+        let event = store
+            .create_node(&entity.id.0, "event", "Started Sep 2024", None, None)
+            .unwrap();
+        assert_eq!(event.node_type, NodeType::Event);
+
+        let collection = store
+            .create_node(&cat.id.0, "collection", "Programming Languages", None, None)
+            .unwrap();
+        assert_eq!(collection.node_type, NodeType::Collection);
+
+        let detail = store
+            .create_node(&attr.id.0, "detail", "Joint degree between Maths and CS", None, None)
+            .unwrap();
+        assert_eq!(detail.node_type, NodeType::Detail);
+
+        // Verify hierarchy: root -> cat -> entity -> attr -> detail
+        let ctx = store.get_context(&detail.id.0, Some(0)).unwrap();
+        assert_eq!(ctx.ancestors.len(), 4); // attr, entity, cat, root
+    }
+
+    #[test]
     fn test_persistence() {
         let tmp = NamedTempFile::new().unwrap();
         let path = tmp.path().to_path_buf();

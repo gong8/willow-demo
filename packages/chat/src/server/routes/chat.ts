@@ -3,8 +3,8 @@ import { PrismaClient } from "@prisma/client";
 import { Hono } from "hono";
 import { streamSSE } from "hono/streaming";
 import { z } from "zod";
-import { BLOCKED_BUILTIN_TOOLS, streamCliChat } from "../services/cli-chat.js";
-import { getIndexerStatus, runIndexer } from "../services/indexer.js";
+import { BLOCKED_BUILTIN_TOOLS } from "../services/cli-chat.js";
+import { createCombinedStream } from "../services/combined-stream.js";
 import {
 	getStream,
 	startStream,
@@ -23,10 +23,10 @@ const CHAT_SYSTEM_PROMPT = `You are Willow, a personal knowledge assistant with 
 
 <memory_behavior>
 RECALLING FACTS:
-When the user asks something that might relate to stored knowledge:
-1. Use search_nodes to find relevant facts
-2. Use get_context to understand where facts sit in the tree and see related information
-3. Be transparent: "I remember you mentioned..." or "I don't have that in my memory yet"
+Relevant memories are automatically retrieved and provided to you in <retrieved_memories> tags before you respond. Use this context to answer naturally.
+- If you need more detail on a specific node, use get_context to drill into it.
+- Be transparent: "I remember you mentioned..." or "I don't have that in my memory yet"
+- Do NOT search for information yourself — the search agent handles that automatically.
 
 Memory updates happen automatically in the background — you don't need to store, update, or organize facts.
 </memory_behavior>
@@ -46,6 +46,7 @@ Memory updates happen automatically in the background — you don't need to stor
 
 const CHAT_DISALLOWED_TOOLS = [
 	...BLOCKED_BUILTIN_TOOLS,
+	"mcp__willow__search_nodes",
 	"mcp__willow__create_node",
 	"mcp__willow__update_node",
 	"mcp__willow__delete_node",
@@ -125,20 +126,6 @@ chatRoutes.get("/conversations/:id/stream-status", async (c) => {
 			? { active: true, status: existing.status }
 			: { active: false, status: null },
 	);
-});
-
-// Indexer status
-chatRoutes.get("/conversations/:id/indexer-status", async (c) => {
-	const { id } = c.req.param();
-	const job = getIndexerStatus(id);
-	if (!job) {
-		return c.json({ active: false, status: null, toolCalls: [] });
-	}
-	return c.json({
-		active: job.status === "running",
-		status: job.status,
-		toolCalls: job.toolCalls,
-	});
 });
 
 // Reconnect to active stream
@@ -245,26 +232,23 @@ chatRoutes.post("/stream", async (c) => {
 				.filter((p): p is string => p !== null)
 		: [];
 
-	const cliStream = streamCliChat({
-		messages: history as Array<{
-			role: "system" | "user" | "assistant";
-			content: string;
-		}>,
-		systemPrompt: CHAT_SYSTEM_PROMPT,
+	const cliStream = createCombinedStream({
+		chatOptions: {
+			messages: history as Array<{
+				role: "system" | "user" | "assistant";
+				content: string;
+			}>,
+			systemPrompt: CHAT_SYSTEM_PROMPT,
+			mcpServerPath: MCP_SERVER_PATH,
+			images: allImagePaths.length > 0 ? allImagePaths : undefined,
+			newImages: newImagePaths.length > 0 ? newImagePaths : undefined,
+			disallowedTools: CHAT_DISALLOWED_TOOLS,
+		},
+		userMessage: message,
 		mcpServerPath: MCP_SERVER_PATH,
-		images: allImagePaths.length > 0 ? allImagePaths : undefined,
-		newImages: newImagePaths.length > 0 ? newImagePaths : undefined,
-		disallowedTools: CHAT_DISALLOWED_TOOLS,
 	});
 
-	startStream(conversationId, cliStream, db, (fullContent) => {
-		runIndexer({
-			conversationId,
-			userMessage: message,
-			assistantResponse: fullContent,
-			mcpServerPath: MCP_SERVER_PATH,
-		});
-	});
+	startStream(conversationId, cliStream, db);
 	return pipeStreamToSSE(c, conversationId);
 });
 

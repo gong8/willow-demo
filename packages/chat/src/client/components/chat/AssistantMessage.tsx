@@ -5,8 +5,15 @@ import {
 } from "@assistant-ui/react";
 import { MarkdownTextPrimitive } from "@assistant-ui/react-markdown";
 import { ClipboardCopy, RefreshCw } from "lucide-react";
+import { useMemo } from "react";
 import remarkGfm from "remark-gfm";
+import type {
+	IndexerResultsPart,
+	SearchResultsPart,
+} from "../../lib/chat-adapter.js";
+import { IndexerIndicator } from "./IndexerIndicator.js";
 import { ReasoningDisplay } from "./ReasoningDisplay.js";
+import { SearchIndicator } from "./SearchIndicator.js";
 import { WillowToolCallDisplay } from "./WillowToolCallDisplay.js";
 
 function formatTimestamp(date: Date): string {
@@ -27,10 +34,37 @@ function MarkdownText() {
 	return <MarkdownTextPrimitive remarkPlugins={[remarkGfm]} />;
 }
 
+function SearchResults() {
+	const content = useMessage((m) => m.content);
+	const searchPart = useMemo(() => {
+		for (const p of content) {
+			const part = p as unknown as SearchResultsPart;
+			if (part.type === "search-results") return part;
+		}
+		return null;
+	}, [content]);
+	if (!searchPart) return null;
+	return <SearchIndicator toolCalls={searchPart.toolCalls} />;
+}
+
+function IndexerResults() {
+	const content = useMessage((m) => m.content);
+	const indexerPart = useMemo(() => {
+		for (const p of content) {
+			const part = p as unknown as IndexerResultsPart;
+			if (part.type === "indexer-results") return part;
+		}
+		return null;
+	}, [content]);
+	if (!indexerPart) return null;
+	return <IndexerIndicator part={indexerPart} />;
+}
+
 export function AssistantMessage() {
 	return (
 		<MessagePrimitive.Root className="group flex px-4 py-2">
 			<div className="flex flex-col gap-1 max-w-full">
+				<SearchResults />
 				<div className="prose prose-sm max-w-none rounded-2xl bg-muted px-4 py-2">
 					<MessagePrimitive.Content
 						components={{
@@ -42,6 +76,7 @@ export function AssistantMessage() {
 						}}
 					/>
 				</div>
+				<IndexerResults />
 				<div className="flex items-center gap-1.5 opacity-0 group-hover:opacity-100 transition-opacity">
 					<MessageTimestamp />
 					<ActionBarPrimitive.Root className="flex items-center gap-1">

@@ -3,7 +3,11 @@ import type { NodeType } from "../../lib/graph-types.js";
 const NODE_TYPE_CONFIG: { type: NodeType; label: string; color: string }[] = [
 	{ type: "root", label: "Root", color: "#6366f1" },
 	{ type: "category", label: "Categories", color: "#8b5cf6" },
-	{ type: "detail", label: "Details", color: "#06b6d4" },
+	{ type: "collection", label: "Collections", color: "#a78bfa" },
+	{ type: "entity", label: "Entities", color: "#f59e0b" },
+	{ type: "attribute", label: "Attributes", color: "#06b6d4" },
+	{ type: "event", label: "Events", color: "#22c55e" },
+	{ type: "detail", label: "Details", color: "#94a3b8" },
 ];
 
 export function GraphFilters({

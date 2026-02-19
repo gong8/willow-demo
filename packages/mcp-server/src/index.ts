@@ -50,7 +50,7 @@ server.tool(
 // create_node
 server.tool(
 	"create_node",
-	"Create a new node in the knowledge graph. Use 'category' for grouping topics, 'detail' for individual facts. Always specify a parent node.",
+	"Create a new node in the knowledge graph. Types: 'category' for top-level grouping, 'collection' for sub-groups, 'entity' for named things, 'attribute' for facts/properties, 'event' for time-bound occurrences, 'detail' for additional depth/elaboration. Always specify a parent node.",
 	schemas.createNode.shape,
 	async (input) => {
 		const node = store.createNode(input);

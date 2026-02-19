@@ -7,7 +7,7 @@ import sharp from "sharp";
 import { LineBuffer } from "./line-buffer.js";
 
 const BASE_TEMP_DIR = join(tmpdir(), "willow-cli");
-const LLM_MODEL = process.env.LLM_MODEL || "claude-sonnet-4-5-20250929";
+const LLM_MODEL = process.env.LLM_MODEL || "claude-opus-4-6";
 const CLI_IMAGE_MAX_DIM = 1536;
 const CLI_IMAGE_QUALITY = 80;
 
@@ -207,6 +207,7 @@ export interface ToolCallData {
 	args: Record<string, unknown>;
 	result?: string;
 	isError?: boolean;
+	phase?: "search" | "chat" | "indexer";
 }
 
 export interface CliChatOptions {
@@ -599,5 +600,52 @@ export function streamCliChat(
 			proc.on("error", close);
 			wireProcessLifecycle(proc, emit, parser, invocationDir, options.signal);
 		},
+	});
+}
+
+/**
+ * Promise-based chat agent that emits SSE events via callback.
+ * Used by combined-stream to run the chat phase without creating a ReadableStream.
+ */
+export async function runChatAgent(
+	options: CliChatOptions,
+	emitSSE: SSEEmitter,
+): Promise<void> {
+	const { invocationDir, args } = await prepareInvocation(options);
+
+	return new Promise((resolve) => {
+		let proc: ChildProcessWithoutNullStreams;
+		try {
+			proc = spawnCli(args, invocationDir);
+		} catch (err) {
+			const msg = err instanceof Error ? err.message : "Unknown spawn error";
+			emitSSE("error", JSON.stringify({ error: msg }));
+			cleanupDir(invocationDir);
+			resolve();
+			return;
+		}
+
+		const parser = createStreamParser(emitSSE);
+		proc.stdin?.end();
+
+		if (options.signal) {
+			options.signal.addEventListener("abort", () => {
+				proc.kill("SIGTERM");
+			});
+		}
+
+		pipeStdout(proc, parser);
+
+		proc.stderr?.on("data", () => {
+			// silently discard
+		});
+
+		const finish = () => {
+			cleanupDir(invocationDir);
+			resolve();
+		};
+
+		proc.on("close", finish);
+		proc.on("error", finish);
 	});
 }

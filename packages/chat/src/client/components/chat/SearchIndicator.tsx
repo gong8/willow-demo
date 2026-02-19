@@ -1,13 +1,16 @@
-import { Check, ChevronDown, ChevronRight, Loader2 } from "lucide-react";
+import { ChevronDown, ChevronRight, Loader2, Search } from "lucide-react";
 import { useState } from "react";
-import type { IndexerResultsPart } from "../../lib/chat-adapter.js";
 import { WillowToolViz } from "./graph-viz/WillowToolViz.js";
 
-function IndexerToolCall({
-	tc,
-}: {
-	tc: IndexerResultsPart["toolCalls"][number];
-}) {
+interface SearchToolCall {
+	toolCallId: string;
+	toolName: string;
+	args: Record<string, unknown>;
+	result?: unknown;
+	isError?: boolean;
+}
+
+function SearchToolCallViz({ tc }: { tc: SearchToolCall }) {
 	return (
 		<WillowToolViz
 			toolName={tc.toolName}
@@ -18,15 +21,20 @@ function IndexerToolCall({
 	);
 }
 
-export function IndexerIndicator({ part }: { part: IndexerResultsPart }) {
+export function SearchIndicator({
+	toolCalls,
+}: {
+	toolCalls: SearchToolCall[];
+}) {
 	const [collapsed, setCollapsed] = useState(false);
 
-	const isRunning = part.indexerStatus === "running";
+	// Search is still in progress if any tool call is pending (no result yet)
+	const isSearching = toolCalls.some((tc) => tc.result === undefined);
 
 	return (
 		<div
 			className={`my-1.5 rounded-lg border border-border bg-background text-sm transition-opacity ${
-				!isRunning ? "opacity-80" : "opacity-100"
+				!isSearching ? "opacity-80" : "opacity-100"
 			}`}
 		>
 			<button
@@ -34,13 +42,13 @@ export function IndexerIndicator({ part }: { part: IndexerResultsPart }) {
 				onClick={() => setCollapsed(!collapsed)}
 				className="flex w-full items-center gap-2 px-3 py-2 text-left hover:bg-accent/50 transition-colors rounded-lg"
 			>
-				{isRunning ? (
-					<Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin text-violet-500" />
+				{isSearching ? (
+					<Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin text-blue-500" />
 				) : (
-					<Check className="h-3.5 w-3.5 shrink-0 text-green-600" />
+					<Search className="h-3.5 w-3.5 shrink-0 text-blue-500" />
 				)}
 				<span className="flex-1 text-muted-foreground">
-					{isRunning ? "Updating memory..." : "Memory updated"}
+					{isSearching ? "Searching memory..." : "Memory searched"}
 				</span>
 				{collapsed ? (
 					<ChevronRight className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
@@ -48,10 +56,10 @@ export function IndexerIndicator({ part }: { part: IndexerResultsPart }) {
 					<ChevronDown className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
 				)}
 			</button>
-			{!collapsed && part.toolCalls.length > 0 && (
+			{!collapsed && toolCalls.length > 0 && (
 				<div className="border-t border-border px-3 py-2 space-y-1">
-					{part.toolCalls.map((tc) => (
-						<IndexerToolCall key={tc.toolCallId} tc={tc} />
+					{toolCalls.map((tc) => (
+						<SearchToolCallViz key={tc.toolCallId} tc={tc} />
 					))}
 				</div>
 			)}

@@ -29,6 +29,7 @@ export interface ToolCallData {
 	args: Record<string, unknown>;
 	result?: string;
 	isError?: boolean;
+	phase?: "search" | "chat" | "indexer";
 }
 
 export async function fetchConversations(): Promise<Conversation[]> {
@@ -50,21 +51,6 @@ export async function fetchMessages(
 ): Promise<Message[]> {
 	const res = await fetch(
 		`${BASE_URL}/chat/conversations/${conversationId}/messages`,
-	);
-	return res.json();
-}
-
-export interface IndexerStatus {
-	active: boolean;
-	status: "running" | "complete" | "error" | null;
-	toolCalls: ToolCallData[];
-}
-
-export async function fetchIndexerStatus(
-	conversationId: string,
-): Promise<IndexerStatus> {
-	const res = await fetch(
-		`${BASE_URL}/chat/conversations/${conversationId}/indexer-status`,
 	);
 	return res.json();
 }

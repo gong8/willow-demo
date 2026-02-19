@@ -8,6 +8,7 @@ import {
 import type {
 	GraphEdge,
 	GraphNode,
+	NodeType,
 	WillowGraph,
 	WillowNode,
 } from "../../../lib/graph-types.js";
@@ -213,13 +214,8 @@ function extractSearchNodes(
 	}
 
 	if (hasResult && matchedIds.length === 0) {
-		// Search completed but found nothing — show BFS across the whole tree
-		const { collected, layers } = bfsCollect(graph, MAX_NODES);
-		if (collected.size < 2) return null;
-
-		const { nodes, edges } = buildSubgraphFromNodes(graph, collected);
-		const phases = buildBfsPhases(layers, edges);
-		return { nodes, edges, phases, focusNodeIds: [graph.root_id] };
+		// Search completed but found nothing
+		return null;
 	}
 
 	if (!hasResult) {
@@ -229,6 +225,12 @@ function extractSearchNodes(
 
 		const { nodes, edges } = buildSubgraphFromNodes(graph, collected);
 		const phases = buildBfsPhases(layers, edges);
+		// Dim everything back to just root — "waiting for results"
+		phases.push({
+			activeNodeIds: graph.root_id ? [graph.root_id] : [],
+			activeEdgeIds: [],
+			selectedNodeIds: [],
+		});
 		return { nodes, edges, phases, focusNodeIds: [graph.root_id] };
 	}
 
@@ -247,7 +249,7 @@ function extractSearchNodes(
 
 	const { nodes, edges } = buildSubgraphFromNodes(graph, collected);
 
-	// BFS phases from root through the subgraph, ending with matched highlights
+	// BFS phases from root through the subgraph
 	const layers: string[][] = [];
 	const visited = new Set<string>();
 	let frontier = graph.root_id ? [graph.root_id] : [];
@@ -274,9 +276,24 @@ function extractSearchNodes(
 	}
 
 	const validMatches = matchedIds.filter((id) => collected.has(id));
-	const phases = buildBfsPhases(layers, edges, validMatches);
+	const bfsPhases = buildBfsPhases(layers, edges, validMatches);
 
-	return { nodes, edges, phases, focusNodeIds: matchedIds };
+	// Focused final phase: only matches + ancestor paths stay colored, rest dims
+	const focusedIds = new Set<string>(validMatches);
+	for (const id of validMatches) {
+		for (const ancestor of getAncestors(graph, id)) {
+			if (collected.has(ancestor.id)) focusedIds.add(ancestor.id);
+		}
+	}
+	bfsPhases.push({
+		activeNodeIds: [...focusedIds],
+		activeEdgeIds: edges
+			.filter((e) => focusedIds.has(e.source) && focusedIds.has(e.target))
+			.map((e) => e.id),
+		selectedNodeIds: validMatches,
+	});
+
+	return { nodes, edges, phases: bfsPhases, focusNodeIds: matchedIds };
 }
 
 function extractGetContext(
@@ -308,6 +325,11 @@ function extractGetContext(
 	const ancestorIds = getAncestors(graph, nodeId).map((n) => n.id);
 	const childIds = target.children.filter((id) => collected.has(id));
 
+	const coreIds = new Set([nodeId, ...ancestorIds]);
+	const coreEdgeIds = edges
+		.filter((e) => coreIds.has(e.source) && coreIds.has(e.target))
+		.map((e) => e.id);
+
 	const phases: AnimationPhase[] = [
 		{
 			activeNodeIds: [nodeId],
@@ -316,22 +338,18 @@ function extractGetContext(
 		},
 		{
 			activeNodeIds: [nodeId, ...ancestorIds],
-			activeEdgeIds: edges
-				.filter(
-					(e) =>
-						ancestorIds.includes(e.source) || ancestorIds.includes(e.target),
-				)
-				.filter(
-					(e) =>
-						[nodeId, ...ancestorIds].includes(e.source) &&
-						[nodeId, ...ancestorIds].includes(e.target),
-				)
-				.map((e) => e.id),
+			activeEdgeIds: coreEdgeIds,
 			selectedNodeIds: [nodeId],
 		},
 		{
 			activeNodeIds: [...collected],
 			activeEdgeIds: edges.map((e) => e.id),
+			selectedNodeIds: [nodeId],
+		},
+		// Final focused phase: dim children, keep target + ancestors
+		{
+			activeNodeIds: [...coreIds],
+			activeEdgeIds: coreEdgeIds,
 			selectedNodeIds: [nodeId],
 		},
 	];
@@ -383,8 +401,8 @@ function extractCreateNode(
 						? `${args.content.slice(0, 40)}...`
 						: args.content
 					: "New node",
-			fill: NODE_COLORS[(args.nodeType as "category" | "detail") ?? "detail"],
-			size: NODE_SIZES[(args.nodeType as "category" | "detail") ?? "detail"],
+			fill: NODE_COLORS[(args.nodeType as NodeType) ?? "detail"],
+			size: NODE_SIZES[(args.nodeType as NodeType) ?? "detail"],
 		});
 		edges.push(buildTreeEdge(parentId, newNodeId));
 		collected.add(newNodeId);
@@ -392,8 +410,13 @@ function extractCreateNode(
 
 	const focusId = newNodeId ?? parentId;
 
-	// Phases: parent area first, then new node pops in
+	// Phases: parent area first, new node pops in, then focus on new node + parent
 	const existingIds = [...collected].filter((id) => id !== newNodeId);
+	const focusIds = new Set(newNodeId ? [parentId, newNodeId] : [parentId]);
+	const focusEdgeIds = edges
+		.filter((e) => focusIds.has(e.source) && focusIds.has(e.target))
+		.map((e) => e.id);
+
 	const phases: AnimationPhase[] = [
 		{
 			activeNodeIds: existingIds,
@@ -408,6 +431,12 @@ function extractCreateNode(
 		{
 			activeNodeIds: [...collected],
 			activeEdgeIds: edges.map((e) => e.id),
+			selectedNodeIds: newNodeId ? [newNodeId] : [],
+		},
+		// Final focused phase: dim siblings, keep parent + new node
+		{
+			activeNodeIds: [...focusIds],
+			activeEdgeIds: focusEdgeIds,
 			selectedNodeIds: newNodeId ? [newNodeId] : [],
 		},
 	];
@@ -443,6 +472,12 @@ function extractUpdateNode(
 			activeEdgeIds: edges.map((e) => e.id),
 			selectedNodeIds: [nodeId],
 		},
+		// Final focused phase: dim neighbors, keep target
+		{
+			activeNodeIds: [nodeId],
+			activeEdgeIds: [],
+			selectedNodeIds: [nodeId],
+		},
 	];
 
 	return { nodes, edges, phases, focusNodeIds: [nodeId] };
@@ -474,6 +509,12 @@ function extractDeleteNode(
 		{
 			activeNodeIds: [...collected],
 			activeEdgeIds: edges.map((e) => e.id),
+			selectedNodeIds: [nodeId],
+		},
+		// Final focused phase: dim neighbors, keep target
+		{
+			activeNodeIds: [nodeId],
+			activeEdgeIds: [],
 			selectedNodeIds: [nodeId],
 		},
 	];
@@ -564,6 +605,12 @@ function extractAddLink(
 		{
 			activeNodeIds: allIds,
 			activeEdgeIds: [...treeEdgeIds, linkEdgeId],
+			selectedNodeIds: [sourceId, targetId],
+		},
+		// Final focused phase: dim parents, keep endpoints + link
+		{
+			activeNodeIds: [sourceId, targetId],
+			activeEdgeIds: [linkEdgeId],
 			selectedNodeIds: [sourceId, targetId],
 		},
 	];

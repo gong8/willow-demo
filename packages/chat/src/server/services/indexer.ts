@@ -1,4 +1,4 @@
-import type { ToolCallData } from "./cli-chat.js";
+import type { SSEEmitter, ToolCallData } from "./cli-chat.js";
 import {
 	BLOCKED_BUILTIN_TOOLS,
 	cleanupDir,
@@ -12,151 +12,161 @@ import {
 
 const INDEXER_SYSTEM_PROMPT = `You are a background knowledge-graph indexer. Your ONLY job is to analyze a conversation and update the user's knowledge graph with any new facts.
 
+NODE TYPES (use the most specific type that fits):
+- "category": Top-level grouping (Education, Work, Hobbies). Direct children of root.
+- "collection": Sub-grouping within a category or entity (Programming Languages, Architecture, Contact Info).
+- "entity": A named thing — person, organization, project, place, tool (Imperial College, Python, Willow).
+- "attribute": A fact or property about something (BEng Maths & CS, Location: London).
+- "event": A time-bound occurrence (IBM Z Datathon Oct 2024, Started university Sep 2024).
+- "detail": Additional depth or elaboration on any node. Use when a fact needs further explanation or nuance.
+
+BUILD DEEP HIERARCHIES: root → category → entity/collection → attribute/event → detail.
+Any node can have children. Use "detail" to add depth anywhere — entities within entities, details within details. Don't flatten everything under category.
+
 RULES:
 1. First, use search_nodes to check what already exists — never create duplicates.
-2. Use create_node to store genuinely new facts under appropriate categories. Create categories (node_type: "category" under root) if needed.
-3. Use update_node if a fact updates or corrects something already stored. Provide a reason.
-4. Use add_link to connect related facts across different categories.
-5. Use delete_node to remove information that is clearly outdated or wrong.
-6. If there is nothing new to store, do nothing.
-7. Keep facts atomic — one fact per node.
-8. Use meaningful metadata (source: "conversation", confidence: "high"/"medium").
-9. Organize under broad categories: Work, Hobbies, Health, Relationships, Preferences, etc.
+2. Use update_node if a fact updates or corrects something already stored. Provide a reason.
+3. Use add_link to connect related facts across different categories.
+4. Use delete_node to remove information that is clearly outdated or wrong.
+5. If there is nothing new to store, do nothing.
+6. Keep facts atomic — one fact per node.
+7. Use meaningful metadata (source: "conversation", confidence: "high"/"medium").
 
 Do NOT respond to the user. Do NOT produce any conversational text. Only make tool calls.`;
 
-export interface IndexerJob {
-	conversationId: string;
-	status: "running" | "complete" | "error";
-	toolCalls: ToolCallData[];
-	startedAt: number;
-	completedAt?: number;
-}
-
-const jobs = new Map<string, IndexerJob>();
-
-const AUTO_REMOVE_MS = 300_000; // 5 minutes
-
-interface RunIndexerOptions {
-	conversationId: string;
+export interface RunIndexerAgentOptions {
 	userMessage: string;
 	assistantResponse: string;
 	mcpServerPath: string;
+	emitSSE: SSEEmitter;
+	signal?: AbortSignal;
 }
 
-export function runIndexer(options: RunIndexerOptions): void {
-	const { conversationId, userMessage, assistantResponse, mcpServerPath } =
+export function runIndexerAgent(
+	options: RunIndexerAgentOptions,
+): Promise<void> {
+	const { userMessage, assistantResponse, mcpServerPath, emitSSE, signal } =
 		options;
 
-	const job: IndexerJob = {
-		conversationId,
-		status: "running",
-		toolCalls: [],
-		startedAt: Date.now(),
-	};
-	jobs.set(conversationId, job);
+	return new Promise((resolve) => {
+		const toolCalls: ToolCallData[] = [];
 
-	const invocationDir = createInvocationDir();
-	const mcpConfigPath = writeMcpConfig(invocationDir, mcpServerPath);
-	const systemPromptPath = writeSystemPrompt(
-		invocationDir,
-		INDEXER_SYSTEM_PROMPT,
-	);
+		const invocationDir = createInvocationDir();
+		const mcpConfigPath = writeMcpConfig(invocationDir, mcpServerPath);
+		const systemPromptPath = writeSystemPrompt(
+			invocationDir,
+			INDEXER_SYSTEM_PROMPT,
+		);
 
-	const prompt = `<conversation>\nUser: ${userMessage}\nAssistant: ${assistantResponse}\n</conversation>\nAnalyze the above and update the knowledge graph with any new facts about the user.`;
+		const prompt = `<conversation>\nUser: ${userMessage}\nAssistant: ${assistantResponse}\n</conversation>\nAnalyze the above and update the knowledge graph with any new facts about the user.`;
 
-	const args = [
-		"--print",
-		"--output-format",
-		"stream-json",
-		"--verbose",
-		"--model",
-		"opus",
-		"--dangerously-skip-permissions",
-		"--mcp-config",
-		mcpConfigPath,
-		"--strict-mcp-config",
-		"--disallowedTools",
-		...BLOCKED_BUILTIN_TOOLS,
-		"--append-system-prompt-file",
-		systemPromptPath,
-		"--setting-sources",
-		"",
-		"--no-session-persistence",
-		"--max-turns",
-		"10",
-		prompt,
-	];
+		const args = [
+			"--print",
+			"--output-format",
+			"stream-json",
+			"--verbose",
+			"--include-partial-messages",
+			"--model",
+			"opus",
+			"--dangerously-skip-permissions",
+			"--mcp-config",
+			mcpConfigPath,
+			"--strict-mcp-config",
+			"--disallowedTools",
+			...BLOCKED_BUILTIN_TOOLS,
+			"--append-system-prompt-file",
+			systemPromptPath,
+			"--setting-sources",
+			"",
+			"--no-session-persistence",
+			"--max-turns",
+			"10",
+			prompt,
+		];
 
-	let proc: ReturnType<typeof spawnCli>;
-	try {
-		proc = spawnCli(args, invocationDir);
-	} catch {
-		job.status = "error";
-		job.completedAt = Date.now();
-		cleanupDir(invocationDir);
-		scheduleRemoval(conversationId);
-		return;
-	}
-
-	// Dummy emitter that only extracts tool call data into the job
-	const emitter = (event: string, data: string) => {
+		let proc: ReturnType<typeof spawnCli>;
 		try {
-			const parsed = JSON.parse(data);
-			if (event === "tool_call_start") {
-				job.toolCalls.push({
-					toolCallId: parsed.toolCallId as string,
-					toolName: parsed.toolName as string,
-					args: {},
-				});
-			} else if (event === "tool_call_args") {
-				const tc = job.toolCalls.find(
-					(t) => t.toolCallId === parsed.toolCallId,
-				);
-				if (tc) tc.args = parsed.args as Record<string, unknown>;
-			} else if (event === "tool_result") {
-				const tc = job.toolCalls.find(
-					(t) => t.toolCallId === parsed.toolCallId,
-				);
-				if (tc) {
-					tc.result = parsed.result as string;
-					tc.isError = parsed.isError as boolean;
-				}
-			}
+			proc = spawnCli(args, invocationDir);
 		} catch {
-			// ignore parse errors
+			cleanupDir(invocationDir);
+			resolve();
+			return;
 		}
-	};
 
-	const parser = createStreamParser(emitter);
-	proc.stdin?.end();
-	pipeStdout(proc, parser);
+		// Emit tool call events to the parent stream with indexer__ prefix
+		const indexerEmitter: SSEEmitter = (event, data) => {
+			try {
+				const parsed = JSON.parse(data);
+				if (event === "tool_call_start") {
+					const prefixedId = `indexer__${parsed.toolCallId}`;
+					toolCalls.push({
+						toolCallId: prefixedId,
+						toolName: parsed.toolName as string,
+						args: {},
+						phase: "indexer",
+					});
+					emitSSE(
+						"tool_call_start",
+						JSON.stringify({
+							toolCallId: prefixedId,
+							toolName: parsed.toolName,
+						}),
+					);
+				} else if (event === "tool_call_args") {
+					const prefixedId = `indexer__${parsed.toolCallId}`;
+					const tc = toolCalls.find((t) => t.toolCallId === prefixedId);
+					if (tc) tc.args = parsed.args as Record<string, unknown>;
+					emitSSE(
+						"tool_call_args",
+						JSON.stringify({
+							toolCallId: prefixedId,
+							toolName: parsed.toolName,
+							args: parsed.args,
+						}),
+					);
+				} else if (event === "tool_result") {
+					const prefixedId = `indexer__${parsed.toolCallId}`;
+					const tc = toolCalls.find((t) => t.toolCallId === prefixedId);
+					if (tc) {
+						tc.result = parsed.result as string;
+						tc.isError = parsed.isError as boolean;
+					}
+					emitSSE(
+						"tool_result",
+						JSON.stringify({
+							toolCallId: prefixedId,
+							result: parsed.result,
+							isError: parsed.isError,
+						}),
+					);
+				}
+				// Content from indexer is silently discarded (no text output needed)
+			} catch {
+				// ignore parse errors
+			}
+		};
 
-	proc.stderr?.on("data", () => {
-		// silently discard
+		const parser = createStreamParser(indexerEmitter);
+		proc.stdin?.end();
+
+		if (signal) {
+			signal.addEventListener("abort", () => {
+				proc.kill("SIGTERM");
+			});
+		}
+
+		pipeStdout(proc, parser);
+
+		proc.stderr?.on("data", () => {
+			// silently discard
+		});
+
+		const finish = () => {
+			cleanupDir(invocationDir);
+			resolve();
+		};
+
+		proc.on("close", finish);
+		proc.on("error", finish);
 	});
-
-	proc.on("close", () => {
-		job.status = "complete";
-		job.completedAt = Date.now();
-		cleanupDir(invocationDir);
-		scheduleRemoval(conversationId);
-	});
-
-	proc.on("error", () => {
-		job.status = "error";
-		job.completedAt = Date.now();
-		cleanupDir(invocationDir);
-		scheduleRemoval(conversationId);
-	});
-}
-
-function scheduleRemoval(conversationId: string): void {
-	setTimeout(() => {
-		jobs.delete(conversationId);
-	}, AUTO_REMOVE_MS);
-}
-
-export function getIndexerStatus(conversationId: string): IndexerJob | null {
-	return jobs.get(conversationId) ?? null;
 }

@@ -57,7 +57,7 @@ function ChatApp() {
 			/>
 			<div className="flex min-h-0 flex-1 flex-col">
 				{activeView === "graph" ? (
-					<GraphView />
+					<GraphView activeConversationId={activeConversationId} />
 				) : activeConversationId ? (
 					<ChatThread
 						key={activeConversationId}

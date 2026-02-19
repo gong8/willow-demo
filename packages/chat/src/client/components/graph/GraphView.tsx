@@ -17,7 +17,9 @@ async function fetchGraph(): Promise<WillowGraph> {
 	return res.json();
 }
 
-export function GraphView() {
+export function GraphView({
+	activeConversationId: _activeConversationId,
+}: { activeConversationId: string | null }) {
 	const { data: graph } = useQuery<WillowGraph>({
 		queryKey: ["graph"],
 		queryFn: fetchGraph,
@@ -27,7 +29,7 @@ export function GraphView() {
 	const [searchQuery, setSearchQuery] = useState("");
 	const [layout, setLayout] = useState<LayoutType>("forceDirected2d");
 	const [enabledTypes, setEnabledTypes] = useState<Set<NodeType>>(
-		() => new Set(["root", "category", "detail"]),
+		() => new Set<NodeType>(["root", "category", "collection", "entity", "attribute", "event", "detail"]),
 	);
 	const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
 	const [selections, setSelections] = useState<string[]>([]);

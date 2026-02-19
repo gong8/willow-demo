@@ -13,6 +13,10 @@ pub struct LinkId(pub String);
 pub enum NodeType {
     Root,
     Category,
+    Collection,
+    Entity,
+    Attribute,
+    Event,
     Detail,
 }
 
@@ -21,6 +25,10 @@ impl NodeType {
         match self {
             NodeType::Root => "root",
             NodeType::Category => "category",
+            NodeType::Collection => "collection",
+            NodeType::Entity => "entity",
+            NodeType::Attribute => "attribute",
+            NodeType::Event => "event",
             NodeType::Detail => "detail",
         }
     }
@@ -29,6 +37,10 @@ impl NodeType {
         match s {
             "root" => Some(NodeType::Root),
             "category" => Some(NodeType::Category),
+            "collection" => Some(NodeType::Collection),
+            "entity" => Some(NodeType::Entity),
+            "attribute" => Some(NodeType::Attribute),
+            "event" => Some(NodeType::Event),
             "detail" => Some(NodeType::Detail),
             _ => None,
         }

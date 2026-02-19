@@ -11,8 +11,8 @@ const temporalMetadataSchema = z
 const createNodeSchema = z.object({
 	parentId: z.string().describe("ID of the parent node"),
 	nodeType: z
-		.enum(["category", "detail"])
-		.describe("Type of node: 'category' for grouping, 'detail' for leaf facts"),
+		.enum(["category", "collection", "entity", "attribute", "event", "detail"])
+		.describe("Node type: 'category' for top-level grouping, 'collection' for sub-groups, 'entity' for named things, 'attribute' for facts/properties, 'event' for time-bound occurrences, 'detail' for additional depth/elaboration on any node"),
 	content: z.string().describe("The content/fact to store"),
 	metadata: z
 		.record(z.string())

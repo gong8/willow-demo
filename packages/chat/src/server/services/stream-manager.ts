@@ -74,7 +74,19 @@ function updateStreamState(
 	toolCallIndex: Map<string, number>,
 	eventType: string,
 	parsed: Record<string, unknown>,
+	searchPhase: { active: boolean },
+	indexerPhase: { active: boolean },
 ): void {
+	// Phase events are forwarded to subscribers but don't accumulate state
+	if (eventType === "search_phase") {
+		searchPhase.active = parsed.status === "start";
+		return;
+	}
+	if (eventType === "indexer_phase") {
+		indexerPhase.active = parsed.status === "start";
+		return;
+	}
+
 	if (eventType === "content" && parsed.content) {
 		stream.fullContent += parsed.content;
 		return;
@@ -82,10 +94,16 @@ function updateStreamState(
 
 	if (eventType === "tool_call_start") {
 		const idx = stream.toolCallsData.length;
+		const phase = searchPhase.active
+			? "search"
+			: indexerPhase.active
+				? "indexer"
+				: "chat";
 		stream.toolCallsData.push({
 			toolCallId: parsed.toolCallId as string,
 			toolName: parsed.toolName as string,
 			args: {},
+			phase,
 		});
 		toolCallIndex.set(parsed.toolCallId as string, idx);
 		return;
@@ -183,6 +201,8 @@ async function consumeStream(
 	const reader = cliStream.getReader();
 	const decoder = new TextDecoder();
 	const toolCallIndex = new Map<string, number>();
+	const searchPhase = { active: false };
+	const indexerPhase = { active: false };
 	const lineBuffer = new LineBuffer();
 	const currentEventType = { value: "content" };
 	let status: "complete" | "error" = "complete";
@@ -200,7 +220,14 @@ async function consumeStream(
 
 				try {
 					const obj = JSON.parse(parsed.data);
-					updateStreamState(stream, toolCallIndex, parsed.type, obj);
+					updateStreamState(
+						stream,
+						toolCallIndex,
+						parsed.type,
+						obj,
+						searchPhase,
+						indexerPhase,
+					);
 					emit(parsed.type, JSON.stringify(obj));
 				} catch {
 					// Skip unparseable

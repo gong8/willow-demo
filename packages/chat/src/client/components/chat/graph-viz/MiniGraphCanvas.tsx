@@ -4,14 +4,12 @@ import type { GraphEdge, GraphNode } from "../../../lib/graph-types.js";
 interface MiniGraphCanvasProps {
 	nodes: GraphNode[];
 	edges: GraphEdge[];
-	actives: string[];
 	selections: string[];
 }
 
 export function MiniGraphCanvas({
 	nodes,
 	edges,
-	actives,
 	selections,
 }: MiniGraphCanvasProps) {
 	return (
@@ -23,8 +21,8 @@ export function MiniGraphCanvas({
 				edgeArrowPosition="end"
 				labelType="all"
 				draggable={false}
-				actives={actives}
 				selections={selections}
+				actives={[]}
 			/>
 		</div>
 	);

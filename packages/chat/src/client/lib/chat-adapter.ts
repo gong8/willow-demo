@@ -72,6 +72,30 @@ interface ToolCallState {
 	isError?: boolean;
 }
 
+export interface SearchResultsPart {
+	type: "search-results";
+	searchStatus: "searching" | "done";
+	toolCalls: Array<{
+		toolCallId: string;
+		toolName: string;
+		args: Record<string, unknown>;
+		result?: string;
+		isError?: boolean;
+	}>;
+}
+
+export interface IndexerResultsPart {
+	type: "indexer-results";
+	indexerStatus: "running" | "done";
+	toolCalls: Array<{
+		toolCallId: string;
+		toolName: string;
+		args: Record<string, unknown>;
+		result?: string;
+		isError?: boolean;
+	}>;
+}
+
 type ContentPart =
 	| { type: "reasoning"; text: string }
 	| {
@@ -83,12 +107,16 @@ type ContentPart =
 			result?: unknown;
 			isError?: boolean;
 	  }
-	| { type: "text"; text: string };
+	| { type: "text"; text: string }
+	| SearchResultsPart
+	| IndexerResultsPart;
 
 interface SseState {
 	textContent: string;
 	thinkingText: string;
 	toolCalls: Map<string, ToolCallState>;
+	searchPhase: "idle" | "searching" | "done";
+	indexerPhase: "idle" | "running" | "done";
 }
 
 function parseTextToolCalls(text: string) {
@@ -132,17 +160,58 @@ function buildContentParts(state: SseState): ContentPart[] {
 	if (state.thinkingText)
 		parts.push({ type: "reasoning", text: state.thinkingText });
 
+	// Separate tool calls by ID prefix
+	const searchCalls: SearchResultsPart["toolCalls"] = [];
+	const indexerCalls: IndexerResultsPart["toolCalls"] = [];
+
 	for (const tc of state.toolCalls.values()) {
+		if (tc.toolCallId.startsWith("search__")) {
+			searchCalls.push({
+				toolCallId: tc.toolCallId,
+				toolName: tc.toolName,
+				args: tc.args ?? {},
+				result: tc.result,
+				isError: tc.isError,
+			});
+		} else if (tc.toolCallId.startsWith("indexer__")) {
+			indexerCalls.push({
+				toolCallId: tc.toolCallId,
+				toolName: tc.toolName,
+				args: tc.args ?? {},
+				result: tc.result,
+				isError: tc.isError,
+			});
+		} else {
+			parts.push({
+				type: "tool-call",
+				toolCallId: tc.toolCallId,
+				toolName: tc.toolName,
+				args: tc.args ?? {},
+				argsText: JSON.stringify(tc.args ?? {}),
+				result: tc.result,
+				isError: tc.isError,
+			});
+		}
+	}
+
+	// Add search results part if there are search tool calls
+	if (searchCalls.length > 0) {
 		parts.push({
-			type: "tool-call",
-			toolCallId: tc.toolCallId,
-			toolName: tc.toolName,
-			args: tc.args ?? {},
-			argsText: JSON.stringify(tc.args ?? {}),
-			result: tc.result,
-			isError: tc.isError,
+			type: "search-results",
+			searchStatus: state.searchPhase === "done" ? "done" : "searching",
+			toolCalls: searchCalls,
 		});
 	}
+
+	// Add indexer results part if there are indexer tool calls or indexer is active
+	if (indexerCalls.length > 0 || state.indexerPhase !== "idle") {
+		parts.push({
+			type: "indexer-results",
+			indexerStatus: state.indexerPhase === "done" ? "done" : "running",
+			toolCalls: indexerCalls,
+		});
+	}
+
 	for (const pc of parsedCalls) {
 		parts.push({
 			type: "tool-call",
@@ -165,6 +234,22 @@ function handleSseEvent(
 	state: SseState,
 ): boolean {
 	switch (eventType) {
+		case "search_phase":
+			if (parsed.status === "start") {
+				state.searchPhase = "searching";
+			} else if (parsed.status === "end") {
+				state.searchPhase = "done";
+			}
+			return true;
+
+		case "indexer_phase":
+			if (parsed.status === "start") {
+				state.indexerPhase = "running";
+			} else if (parsed.status === "end") {
+				state.indexerPhase = "done";
+			}
+			return true;
+
 		case "content":
 			if (parsed.content) {
 				state.textContent += parsed.content as string;
@@ -351,6 +436,8 @@ export function createWillowChatAdapter(
 				textContent: "",
 				thinkingText: "",
 				toolCalls: new Map<string, ToolCallState>(),
+				searchPhase: "idle",
+				indexerPhase: "idle",
 			};
 
 			yield* readSseStream(reader, state);
