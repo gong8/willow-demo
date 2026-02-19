@@ -30,9 +30,8 @@ export function useChatHistory(
 									result?: string;
 									isError?: boolean;
 							  }
-							| SearchResultsPart
-							| IndexerResultsPart
 						> = [];
+						const customMeta: Record<string, unknown> = {};
 
 						if (m.attachments && m.attachments.length > 0) {
 							for (const att of m.attachments) {
@@ -82,19 +81,19 @@ export function useChatHistory(
 								}
 
 								if (searchCalls.length > 0) {
-									contentParts.push({
+									customMeta.searchResults = {
 										type: "search-results",
 										searchStatus: "done",
 										toolCalls: searchCalls,
-									});
+									} satisfies SearchResultsPart;
 								}
 
 								if (indexerCalls.length > 0) {
-									contentParts.push({
+									customMeta.indexerResults = {
 										type: "indexer-results",
 										indexerStatus: "done",
 										toolCalls: indexerCalls,
-									});
+									} satisfies IndexerResultsPart;
 								}
 							} catch {
 								// Invalid tool calls JSON, skip
@@ -158,7 +157,7 @@ export function useChatHistory(
 									reason: "stop",
 								} as const,
 								attachments: [],
-								metadata: { steps: [], custom: {} },
+								metadata: { steps: [], custom: customMeta },
 							},
 							parentId: i === 0 ? null : messages[i - 1].id,
 						};

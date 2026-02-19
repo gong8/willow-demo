@@ -107,9 +107,7 @@ type ContentPart =
 			result?: unknown;
 			isError?: boolean;
 	  }
-	| { type: "text"; text: string }
-	| SearchResultsPart
-	| IndexerResultsPart;
+	| { type: "text"; text: string };
 
 interface SseState {
 	textContent: string;
@@ -153,12 +151,18 @@ function parseTextToolCalls(text: string) {
 	return { cleanText, parsedCalls };
 }
 
-function buildContentParts(state: SseState): ContentPart[] {
+interface BuildResult {
+	contentParts: ContentPart[];
+	searchResults: SearchResultsPart | null;
+	indexerResults: IndexerResultsPart | null;
+}
+
+function buildParts(state: SseState): BuildResult {
 	const { cleanText, parsedCalls } = parseTextToolCalls(state.textContent);
-	const parts: ContentPart[] = [];
+	const contentParts: ContentPart[] = [];
 
 	if (state.thinkingText)
-		parts.push({ type: "reasoning", text: state.thinkingText });
+		contentParts.push({ type: "reasoning", text: state.thinkingText });
 
 	// Separate tool calls by ID prefix
 	const searchCalls: SearchResultsPart["toolCalls"] = [];
@@ -182,7 +186,7 @@ function buildContentParts(state: SseState): ContentPart[] {
 				isError: tc.isError,
 			});
 		} else {
-			parts.push({
+			contentParts.push({
 				type: "tool-call",
 				toolCallId: tc.toolCallId,
 				toolName: tc.toolName,
@@ -194,26 +198,8 @@ function buildContentParts(state: SseState): ContentPart[] {
 		}
 	}
 
-	// Add search results part if there are search tool calls
-	if (searchCalls.length > 0) {
-		parts.push({
-			type: "search-results",
-			searchStatus: state.searchPhase === "done" ? "done" : "searching",
-			toolCalls: searchCalls,
-		});
-	}
-
-	// Add indexer results part if there are indexer tool calls or indexer is active
-	if (indexerCalls.length > 0 || state.indexerPhase !== "idle") {
-		parts.push({
-			type: "indexer-results",
-			indexerStatus: state.indexerPhase === "done" ? "done" : "running",
-			toolCalls: indexerCalls,
-		});
-	}
-
 	for (const pc of parsedCalls) {
-		parts.push({
+		contentParts.push({
 			type: "tool-call",
 			toolCallId: pc.id,
 			toolName: pc.toolName,
@@ -224,8 +210,27 @@ function buildContentParts(state: SseState): ContentPart[] {
 		});
 	}
 
-	parts.push({ type: "text", text: cleanText });
-	return parts;
+	contentParts.push({ type: "text", text: cleanText });
+
+	const searchResults: SearchResultsPart | null =
+		searchCalls.length > 0
+			? {
+					type: "search-results",
+					searchStatus: state.searchPhase === "done" ? "done" : "searching",
+					toolCalls: searchCalls,
+				}
+			: null;
+
+	const indexerResults: IndexerResultsPart | null =
+		indexerCalls.length > 0 || state.indexerPhase !== "idle"
+			? {
+					type: "indexer-results",
+					indexerStatus: state.indexerPhase === "done" ? "done" : "running",
+					toolCalls: indexerCalls,
+				}
+			: null;
+
+	return { contentParts, searchResults, indexerResults };
 }
 
 function handleSseEvent(
@@ -322,8 +327,18 @@ async function* readSseStream(
 	const decoder = new TextDecoder();
 	let buffer = "";
 	const ctx = { eventType: "content" };
-	const snapshot = () =>
-		({ content: buildContentParts(state) }) as ChatModelRunResult;
+	const snapshot = () => {
+		const { contentParts, searchResults, indexerResults } = buildParts(state);
+		return {
+			content: contentParts,
+			metadata: {
+				custom: {
+					...(searchResults ? { searchResults } : {}),
+					...(indexerResults ? { indexerResults } : {}),
+				},
+			},
+		} as ChatModelRunResult;
+	};
 
 	try {
 		while (true) {

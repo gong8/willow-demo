@@ -1,6 +1,7 @@
 use crate::model;
 use crate::search;
 use crate::store;
+use crate::vcs;
 use std::collections::HashMap;
 use std::path::Path;
 
@@ -86,6 +87,68 @@ pub struct JsAddLinkInput {
     pub relation: String,
 }
 
+// ---- VCS DTO structs ----
+
+#[napi(object)]
+pub struct JsCommitInput {
+    pub message: String,
+    pub source: String, // "conversation", "maintenance", "manual", "migration"
+    pub conversation_id: Option<String>,
+    pub summary: Option<String>,
+    pub job_id: Option<String>,
+    pub tool_name: Option<String>,
+}
+
+#[napi(object)]
+pub struct JsCommitEntry {
+    pub hash: String,
+    pub message: String,
+    pub timestamp: String,
+    pub source: String,
+    pub source_detail: Option<String>,
+    pub parents: Vec<String>,
+    pub storage_type: String,
+}
+
+#[napi(object)]
+pub struct JsNodeChangeSummary {
+    pub node_id: String,
+    pub node_type: String,
+    pub content: String,
+    pub old_content: Option<String>,
+    pub path: Vec<String>,
+}
+
+#[napi(object)]
+pub struct JsLinkChangeSummary {
+    pub link_id: String,
+    pub from_node: String,
+    pub to_node: String,
+    pub relation: String,
+}
+
+#[napi(object)]
+pub struct JsChangeSummary {
+    pub nodes_created: Vec<JsNodeChangeSummary>,
+    pub nodes_updated: Vec<JsNodeChangeSummary>,
+    pub nodes_deleted: Vec<JsNodeChangeSummary>,
+    pub links_created: Vec<JsLinkChangeSummary>,
+    pub links_removed: Vec<JsLinkChangeSummary>,
+}
+
+#[napi(object)]
+pub struct JsCommitDetail {
+    pub commit: JsCommitEntry,
+    pub diff: JsChangeSummary,
+}
+
+#[napi(object)]
+pub struct JsBranchInfo {
+    pub name: String,
+    pub head: String,
+    pub is_current: bool,
+}
+
 // ---- Conversions ----
 
 fn node_to_js(node: &model::Node) -> JsNode {
@@ -149,6 +212,128 @@ fn search_result_to_js(r: &search::SearchResult) -> JsSearchResult {
         score: r.score,
         matched_field: r.matched_field.clone(),
         depth: r.depth as u32,
+    }
+}
+
+fn commit_source_to_string(source: &vcs::types::CommitSource) -> (String, Option<String>) {
+    match source {
+        vcs::types::CommitSource::Conversation {
+            conversation_id,
+            summary,
+        } => (
+            "conversation".to_string(),
+            conversation_id
+                .clone()
+                .or_else(|| summary.clone()),
+        ),
+        vcs::types::CommitSource::Maintenance { job_id } => {
+            ("maintenance".to_string(), job_id.clone())
+        }
+        vcs::types::CommitSource::Manual { tool_name } => {
+            ("manual".to_string(), tool_name.clone())
+        }
+        vcs::types::CommitSource::Merge {
+            source_branch,
+            target_branch,
+        } => (
+            "merge".to_string(),
+            Some(format!("{} -> {}", source_branch, target_branch)),
+        ),
+        vcs::types::CommitSource::Migration => ("migration".to_string(), None),
+    }
+}
+
+fn commit_entry_to_js(entry: &vcs::types::CommitEntry) -> JsCommitEntry {
+    let (source, source_detail) = commit_source_to_string(&entry.data.source);
+    JsCommitEntry {
+        hash: entry.hash.0.clone(),
+        message: entry.data.message.clone(),
+        timestamp: entry.data.timestamp.to_rfc3339(),
+        source,
+        source_detail,
+        parents: entry.data.parents.iter().map(|p| p.0.clone()).collect(),
+        storage_type: match entry.data.storage_type {
+            vcs::types::CommitStorageType::Snapshot => "snapshot".to_string(),
+            vcs::types::CommitStorageType::Delta => "delta".to_string(),
+        },
+    }
+}
+
+fn change_summary_to_js(diff: &vcs::diff::ChangeSummary) -> JsChangeSummary {
+    JsChangeSummary {
+        nodes_created: diff
+            .nodes_created
+            .iter()
+            .map(|n| JsNodeChangeSummary {
+                node_id: n.node_id.clone(),
+                node_type: n.node_type.clone(),
+                content: n.content.clone(),
+                old_content: n.old_content.clone(),
+                path: n.path.clone(),
+            })
+            .collect(),
+        nodes_updated: diff
+            .nodes_updated
+            .iter()
+            .map(|n| JsNodeChangeSummary {
+                node_id: n.node_id.clone(),
+                node_type: n.node_type.clone(),
+                content: n.content.clone(),
+                old_content: n.old_content.clone(),
+                path: n.path.clone(),
+            })
+            .collect(),
+        nodes_deleted: diff
+            .nodes_deleted
+            .iter()
+            .map(|n| JsNodeChangeSummary {
+                node_id: n.node_id.clone(),
+                node_type: n.node_type.clone(),
+                content: n.content.clone(),
+                old_content: n.old_content.clone(),
+                path: n.path.clone(),
+            })
+            .collect(),
+        links_created: diff
+            .links_created
+            .iter()
+            .map(|l| JsLinkChangeSummary {
+                link_id: l.link_id.clone(),
+                from_node: l.from_node.clone(),
+                to_node: l.to_node.clone(),
+                relation: l.relation.clone(),
+            })
+            .collect(),
+        links_removed: diff
+            .links_removed
+            .iter()
+            .map(|l| JsLinkChangeSummary {
+                link_id: l.link_id.clone(),
+                from_node: l.from_node.clone(),
+                to_node: l.to_node.clone(),
+                relation: l.relation.clone(),
+            })
+            .collect(),
+    }
+}
+
+fn js_input_to_commit_input(input: JsCommitInput) -> vcs::types::CommitInput {
+    let source = match input.source.as_str() {
+        "conversation" => vcs::types::CommitSource::Conversation {
+            conversation_id: input.conversation_id,
+            summary: input.summary,
+        },
+        "maintenance" => vcs::types::CommitSource::Maintenance {
+            job_id: input.job_id,
+        },
+        "migration" => vcs::types::CommitSource::Migration,
+        _ => vcs::types::CommitSource::Manual {
+            tool_name: input.tool_name,
+        },
+    };
+    vcs::types::CommitInput {
+        message: input.message,
+        source,
     }
 }
 
@@ -250,5 +435,128 @@ impl JsGraphStore {
             .map_err(napi::Error::from)?;
 
         Ok(link_to_js(&link))
+    }
+
+    // ---- VCS methods ----
+
+    #[napi]
+    pub fn vcs_init(&mut self) -> napi::Result<()> {
+        self.inner.vcs_init().map_err(napi::Error::from)
+    }
+
+    #[napi]
+    pub fn has_pending_changes(&self) -> bool {
+        self.inner.has_pending_changes()
+    }
+
+    #[napi]
+    pub fn commit(&mut self, input: JsCommitInput) -> napi::Result<String> {
+        let commit_input = js_input_to_commit_input(input);
+        let hash = self.inner.commit(commit_input).map_err(napi::Error::from)?;
+        Ok(hash.0)
+    }
+
+    #[napi]
+    pub fn discard_changes(&mut self) -> napi::Result<()> {
+        self.inner.discard_changes().map_err(napi::Error::from)
+    }
+
+    #[napi]
+    pub fn log(&self, limit: Option<u32>) -> napi::Result<Vec<JsCommitEntry>> {
+        let repo = self.inner.get_repo().map_err(napi::Error::from)?;
+        let entries = repo
+            .log(limit.map(|n| n as usize))
+            .map_err(napi::Error::from)?;
+        Ok(entries.iter().map(commit_entry_to_js).collect())
+    }
+
+    #[napi]
+    pub fn show_commit(&self, hash: String) -> napi::Result<JsCommitDetail> {
+        let repo = self.inner.get_repo().map_err(napi::Error::from)?;
+        let commit_hash = vcs::types::CommitHash(hash);
+        let (data, diff) = repo.show_commit(&commit_hash).map_err(napi::Error::from)?;
+
+        let entry = vcs::types::CommitEntry {
+            hash: commit_hash,
+            data,
+        };
+        Ok(JsCommitDetail {
+            commit: commit_entry_to_js(&entry),
+            diff: change_summary_to_js(&diff),
+        })
+    }
+
+    #[napi]
+    pub fn diff(&self, from_hash: String, to_hash: String) -> napi::Result<JsChangeSummary> {
+        let repo = self.inner.get_repo().map_err(napi::Error::from)?;
+        let diff = repo
+            .diff(
+                &vcs::types::CommitHash(from_hash),
+                &vcs::types::CommitHash(to_hash),
+            )
+            .map_err(napi::Error::from)?;
+        Ok(change_summary_to_js(&diff))
+    }
+
+    #[napi]
+    pub fn list_branches(&self) -> napi::Result<Vec<JsBranchInfo>> {
+        let repo = self.inner.get_repo().map_err(napi::Error::from)?;
+        let branches = repo.list_branches().map_err(napi::Error::from)?;
+        Ok(branches
+            .iter()
+            .map(|b| JsBranchInfo {
+                name: b.name.clone(),
+                head: b.head.0.clone(),
+                is_current: b.is_current,
+            })
+            .collect())
+    }
+
+    #[napi]
+    pub fn create_branch(&self, name: String) -> napi::Result<()> {
+        let repo = self.inner.get_repo().map_err(napi::Error::from)?;
+        repo.create_branch(&name).map_err(napi::Error::from)
+    }
+
+    #[napi]
+    pub fn switch_branch(&mut self, name: String) -> napi::Result<()> {
+        self.inner.switch_branch(&name).map_err(napi::Error::from)
+    }
+
+    #[napi]
+    pub fn delete_branch(&self, name: String) -> napi::Result<()> {
+        let repo = self.inner.get_repo().map_err(napi::Error::from)?;
+        repo.delete_branch(&name).map_err(napi::Error::from)
+    }
+
+    #[napi]
+    pub fn current_branch(&self) -> napi::Result<Option<String>> {
+        let repo = self.inner.get_repo().map_err(napi::Error::from)?;
+        repo.current_branch().map_err(napi::Error::from)
+    }
+
+    #[napi]
+    pub fn merge_branch(&mut self, source: String) -> napi::Result<String> {
+        let hash = self
+            .inner
+            .merge_branch(&source)
+            .map_err(napi::Error::from)?;
+        Ok(hash.0)
+    }
+
+    #[napi]
+    pub fn checkout_commit(&mut self, hash: String) -> napi::Result<()> {
+        self.inner
+            .checkout_commit(&vcs::types::CommitHash(hash))
+            .map_err(napi::Error::from)
+    }
+
+    #[napi]
+    pub fn restore_to_commit(&mut self, hash: String) -> napi::Result<String> {
+        let new_hash = self
+            .inner
+            .restore_to_commit(&vcs::types::CommitHash(hash))
+            .map_err(napi::Error::from)?;
+        Ok(new_hash.0)
     }
 }

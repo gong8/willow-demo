@@ -12,7 +12,8 @@
 		"artifacts": "napi artifacts",
 		"build": "napi build --platform --release",
 		"build:debug": "napi build --platform",
-		"test": "vitest run"
+		"test": "vitest run",
+		"coverage": "vitest run --coverage"
 	},
 	"devDependencies": {
 		"@napi-rs/cli": "^3.0.0-alpha.86",

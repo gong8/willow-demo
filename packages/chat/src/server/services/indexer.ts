@@ -1,6 +1,6 @@
+import { getDisallowedTools } from "./agent-tools.js";
 import type { SSEEmitter, ToolCallData } from "./cli-chat.js";
 import {
-	BLOCKED_BUILTIN_TOOLS,
 	cleanupDir,
 	createInvocationDir,
 	createStreamParser,
@@ -73,7 +73,7 @@ export function runIndexerAgent(
 			mcpConfigPath,
 			"--strict-mcp-config",
 			"--disallowedTools",
-			...BLOCKED_BUILTIN_TOOLS,
+			...getDisallowedTools("indexer"),
 			"--append-system-prompt-file",
 			systemPromptPath,
 			"--setting-sources",

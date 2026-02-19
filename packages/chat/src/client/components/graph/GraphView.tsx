@@ -10,6 +10,7 @@ import type {
 } from "../../lib/graph-types.js";
 import { GraphFilters } from "./GraphFilters.js";
 import { GraphToolbar } from "./GraphToolbar.js";
+import { MaintenanceIndicator } from "./MaintenanceIndicator.js";
 import { NodeDetailPanel } from "./NodeDetailPanel.js";
 
 async function fetchGraph(): Promise<WillowGraph> {
@@ -29,7 +30,16 @@ export function GraphView({
 	const [searchQuery, setSearchQuery] = useState("");
 	const [layout, setLayout] = useState<LayoutType>("forceDirected2d");
 	const [enabledTypes, setEnabledTypes] = useState<Set<NodeType>>(
-		() => new Set<NodeType>(["root", "category", "collection", "entity", "attribute", "event", "detail"]),
+		() =>
+			new Set<NodeType>([
+				"root",
+				"category",
+				"collection",
+				"entity",
+				"attribute",
+				"event",
+				"detail",
+			]),
 	);
 	const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
 	const [selections, setSelections] = useState<string[]>([]);
@@ -81,13 +91,16 @@ export function GraphView({
 
 	return (
 		<div className="flex min-h-0 flex-1 flex-col">
-			<GraphToolbar
-				searchQuery={searchQuery}
-				onSearchChange={setSearchQuery}
-				layout={layout}
-				onLayoutChange={setLayout}
-				stats={stats}
-			/>
+			<div className="flex items-center border-b border-border bg-muted/30 pr-3">
+				<GraphToolbar
+					searchQuery={searchQuery}
+					onSearchChange={setSearchQuery}
+					layout={layout}
+					onLayoutChange={setLayout}
+					stats={stats}
+				/>
+				<MaintenanceIndicator />
+			</div>
 
 			{isEmpty ? (
 				<div className="flex flex-1 flex-col items-center justify-center gap-3 text-muted-foreground">

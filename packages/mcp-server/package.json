@@ -10,7 +10,9 @@
 	"scripts": {
 		"build": "tsc",
 		"dev": "tsx src/index.ts",
-		"typecheck": "tsc --noEmit"
+		"typecheck": "tsc --noEmit",
+		"test": "vitest run",
+		"coverage": "vitest run --coverage"
 	},
 	"dependencies": {
 		"@modelcontextprotocol/sdk": "^1.12.1",

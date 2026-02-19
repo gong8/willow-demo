@@ -5,7 +5,6 @@ import {
 } from "@assistant-ui/react";
 import { MarkdownTextPrimitive } from "@assistant-ui/react-markdown";
 import { ClipboardCopy, RefreshCw } from "lucide-react";
-import { useMemo } from "react";
 import remarkGfm from "remark-gfm";
 import type {
 	IndexerResultsPart,
@@ -35,27 +34,21 @@ function MarkdownText() {
 }
 
 function SearchResults() {
-	const content = useMessage((m) => m.content);
-	const searchPart = useMemo(() => {
-		for (const p of content) {
-			const part = p as unknown as SearchResultsPart;
-			if (part.type === "search-results") return part;
-		}
-		return null;
-	}, [content]);
+	const searchPart = useMessage(
+		(m) =>
+			(m.metadata?.custom?.searchResults as SearchResultsPart | undefined) ??
+			null,
+	);
 	if (!searchPart) return null;
 	return <SearchIndicator toolCalls={searchPart.toolCalls} />;
 }
 
 function IndexerResults() {
-	const content = useMessage((m) => m.content);
-	const indexerPart = useMemo(() => {
-		for (const p of content) {
-			const part = p as unknown as IndexerResultsPart;
-			if (part.type === "indexer-results") return part;
-		}
-		return null;
-	}, [content]);
+	const indexerPart = useMessage(
+		(m) =>
+			(m.metadata?.custom?.indexerResults as IndexerResultsPart | undefined) ??
+			null,
+	);
 	if (!indexerPart) return null;
 	return <IndexerIndicator part={indexerPart} />;
 }

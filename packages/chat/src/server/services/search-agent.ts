@@ -1,6 +1,6 @@
+import { getDisallowedTools } from "./agent-tools.js";
 import type { SSEEmitter, ToolCallData } from "./cli-chat.js";
 import {
-	BLOCKED_BUILTIN_TOOLS,
 	cleanupDir,
 	createInvocationDir,
 	createStreamParser,
@@ -28,15 +28,6 @@ After exploring, output EXACTLY this format:
 <memory_context>
 [Your summary of all relevant facts found, organized by topic. Include node IDs for reference. If nothing relevant was found, write "No relevant memories found."]
 </memory_context>`;
-
-/** Tools the search agent is NOT allowed to use (everything except search_nodes and get_context). */
-const SEARCH_DISALLOWED_TOOLS = [
-	...BLOCKED_BUILTIN_TOOLS,
-	"mcp__willow__create_node",
-	"mcp__willow__update_node",
-	"mcp__willow__delete_node",
-	"mcp__willow__add_link",
-];
 
 export interface SearchAgentResult {
 	contextSummary: string;
@@ -81,7 +72,7 @@ export function runSearchAgent(
 			mcpConfigPath,
 			"--strict-mcp-config",
 			"--disallowedTools",
-			...SEARCH_DISALLOWED_TOOLS,
+			...getDisallowedTools("search"),
 			"--append-system-prompt-file",
 			systemPromptPath,
 			"--setting-sources",

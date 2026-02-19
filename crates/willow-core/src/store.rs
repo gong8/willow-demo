@@ -2,6 +2,8 @@ use crate::error::WillowError;
 use crate::model::*;
 use crate::search;
 use crate::storage;
+use crate::vcs::repository::Repository;
+use crate::vcs::types::{Change, CommitInput};
 use chrono::Utc;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -17,6 +19,8 @@ pub struct ContextResult {
 pub struct GraphStore {
     pub graph: Graph,
     pub path: PathBuf,
+    pub repo: Option<Repository>,
+    pending_changes: Vec<Change>,
 }
 
 impl GraphStore {
@@ -32,15 +36,125 @@ impl GraphStore {
             graph
         };
 
+        // Try to open existing VCS repo
+        let repo = if let Some(parent) = path.parent() {
+            Repository::open(parent).ok()
+        } else {
+            None
+        };
+
         Ok(GraphStore {
             graph,
             path: path.to_path_buf(),
+            repo,
+            pending_changes: Vec::new(),
         })
     }
 
     fn save(&self) -> Result<(), WillowError> {
         storage::save_graph(&self.path, &self.graph)
     }
+
+    fn record_change(&mut self, change: Change) {
+        if self.repo.is_some() {
+            self.pending_changes.push(change);
+        }
+    }
+
+    // ---- VCS methods ----
+
+    pub fn vcs_init(&mut self) -> Result<(), WillowError> {
+        let graph_dir = self
+            .path
+            .parent()
+            .ok_or_else(|| WillowError::Io(std::io::Error::new(
+                std::io::ErrorKind::NotFound,
+                "No parent directory for graph file",
+            )))?;
+
+        let repo = Repository::init(graph_dir, &self.graph)?;
+        self.repo = Some(repo);
+        Ok(())
+    }
+
+    pub fn has_pending_changes(&self) -> bool {
+        !self.pending_changes.is_empty()
+    }
+
+    pub fn pending_changes(&self) -> &[Change] {
+        &self.pending_changes
+    }
+
+    pub fn commit(&mut self, input: CommitInput) -> Result<crate::vcs::types::CommitHash, WillowError> {
+        let repo = self.repo.as_ref().ok_or(WillowError::VcsNotInitialized)?;
+        let hash = repo.create_commit(&input, &self.pending_changes, &self.graph)?;
+        self.pending_changes.clear();
+        Ok(hash)
+    }
+
+    pub fn discard_changes(&mut self) -> Result<(), WillowError> {
+        let repo = self.repo.as_ref().ok_or(WillowError::VcsNotInitialized)?;
+        // Reconstruct from last commit
+        if let Some(head) = repo.log(Some(1))?.first() {
+            let graph = repo.reconstruct_at(&head.hash)?;
+            self.graph = graph;
+            self.save()?;
+        }
+        self.pending_changes.clear();
+        Ok(())
+    }
+
+    pub fn get_repo(&self) -> Result<&Repository, WillowError> {
+        self.repo.as_ref().ok_or(WillowError::VcsNotInitialized)
+    }
+
+    /// Switch branch — replaces the in-memory graph and saves to disk.
+    pub fn switch_branch(&mut self, name: &str) -> Result<(), WillowError> {
+        let repo = self.repo.as_ref().ok_or(WillowError::VcsNotInitialized)?;
+        let graph = repo.switch_branch(name, self.has_pending_changes())?;
+        self.graph = graph;
+        self.save()?;
+        self.pending_changes.clear();
+        Ok(())
+    }
+
+    /// Checkout a specific commit (detached HEAD).
+    pub fn checkout_commit(&mut self, hash: &crate::vcs::types::CommitHash) -> Result<(), WillowError> {
+        let repo = self.repo.as_ref().ok_or(WillowError::VcsNotInitialized)?;
+        let graph = repo.checkout_commit(hash, self.has_pending_changes())?;
+        self.graph = graph;
+        self.save()?;
+        self.pending_changes.clear();
+        Ok(())
+    }
+
+    /// Restore to a past commit (creates a new commit).
+    pub fn restore_to_commit(&mut self, hash: &crate::vcs::types::CommitHash) -> Result<crate::vcs::types::CommitHash, WillowError> {
+        let repo = self.repo.as_ref().ok_or(WillowError::VcsNotInitialized)?;
+        let (new_hash, graph) = repo.restore_to_commit(hash, &self.graph)?;
+        self.graph = graph;
+        self.save()?;
+        self.pending_changes.clear();
+        Ok(new_hash)
+    }
+
+    /// Merge a source branch into current. Returns Ok(hash) on success.
+    pub fn merge_branch(&mut self, source: &str) -> Result<crate::vcs::types::CommitHash, WillowError> {
+        let repo = self.repo.as_ref().ok_or(WillowError::VcsNotInitialized)?;
+        match repo.merge_branch(source, &self.graph)? {
+            crate::vcs::repository::MergeBranchResult::Success(hash, graph) => {
+                self.graph = graph;
+                self.save()?;
+                self.pending_changes.clear();
+                Ok(hash)
+            }
+            crate::vcs::repository::MergeBranchResult::Conflicts { conflicts, .. } => {
+                Err(WillowError::MergeConflict(conflicts.len()))
+            }
+        }
+    }
+
+    // ---- Mutation methods ----
 
     pub fn create_node(
         &mut self,
@@ -83,8 +197,13 @@ impl GraphStore {
             .children
             .push(node_id.clone());
 
-        self.graph.nodes.insert(node_id, node.clone());
+        self.graph.nodes.insert(node_id.clone(), node.clone());
         self.save()?;
+
+        self.record_change(Change::CreateNode {
+            node_id,
+            node: node.clone(),
+        });
 
         Ok(node)
     }
@@ -178,11 +297,25 @@ impl GraphStore {
         reason: Option<&str>,
     ) -> Result<Node, WillowError> {
         let nid = NodeId(node_id.to_string());
+
+        // Capture old values before mutation for change tracking
+        let (old_content, old_metadata) = {
+            let node = self
+                .graph
+                .nodes
+                .get(&nid)
+                .ok_or_else(|| WillowError::NodeNotFound(node_id.to_string()))?;
+            (node.content.clone(), node.metadata.clone())
+        };
+
         let node = self
             .graph
             .nodes
             .get_mut(&nid)
             .ok_or_else(|| WillowError::NodeNotFound(node_id.to_string()))?;
+
+        let mut content_changed = false;
+        let mut metadata_changed = false;
 
         if let Some(new_content) = content {
             if new_content != node.content {
@@ -193,11 +326,15 @@ impl GraphStore {
                     reason: reason.map(|s| s.to_string()),
                 });
                 node.content = new_content.to_string();
+                content_changed = true;
             }
         }
 
-        if let Some(new_metadata) = metadata {
-            node.metadata = new_metadata;
+        if let Some(new_metadata) = &metadata {
+            if *new_metadata != node.metadata {
+                metadata_changed = true;
+            }
+            node.metadata = new_metadata.clone();
         }
 
         if let Some(new_temporal) = temporal {
@@ -208,6 +345,16 @@ impl GraphStore {
 
         let updated = node.clone();
         self.save()?;
+
+        if content_changed || metadata_changed {
+            self.record_change(Change::UpdateNode {
+                node_id: nid,
+                old_content: if content_changed { Some(old_content) } else { None },
+                new_content: if content_changed { Some(updated.content.clone()) } else { None },
+                old_metadata: if metadata_changed { Some(old_metadata) } else { None },
+                new_metadata: if metadata_changed { Some(updated.metadata.clone()) } else { None },
+            });
+        }
 
         Ok(updated)
     }
@@ -228,6 +375,22 @@ impl GraphStore {
         self.collect_all_descendants(&nid, &mut to_delete);
         to_delete.push(nid.clone());
 
+        // Capture deleted nodes and links for change tracking
+        let deleted_nodes: Vec<Node> = to_delete
+            .iter()
+            .filter_map(|id| self.graph.nodes.get(id).cloned())
+            .collect();
+        let delete_set: std::collections::HashSet<&NodeId> = to_delete.iter().collect();
+        let deleted_links: Vec<Link> = self
+            .graph
+            .links
+            .values()
+            .filter(|link| {
+                delete_set.contains(&link.from_node) || delete_set.contains(&link.to_node)
+            })
+            .cloned()
+            .collect();
+
         // Remove from parent's children
         if let Some(parent_id) = self.graph.nodes.get(&nid).and_then(|n| n.parent_id.clone()) {
             if let Some(parent) = self.graph.nodes.get_mut(&parent_id) {
@@ -236,7 +399,6 @@ impl GraphStore {
         }
 
         // Remove all nodes
-        let delete_set: std::collections::HashSet<&NodeId> = to_delete.iter().collect();
         for id in &to_delete {
             self.graph.nodes.remove(id);
         }
@@ -247,6 +409,12 @@ impl GraphStore {
             .retain(|_, link| !delete_set.contains(&link.from_node) && !delete_set.contains(&link.to_node));
 
         self.save()?;
+
+        self.record_change(Change::DeleteNode {
+            node_id: nid,
+            deleted_nodes,
+            deleted_links,
+        });
 
         Ok(())
     }
@@ -298,6 +466,11 @@ impl GraphStore {
 
         self.graph.links.insert(link.id.clone(), link.clone());
         self.save()?;
+
+        self.record_change(Change::AddLink {
+            link_id: link.id.clone(),
+            link: link.clone(),
+        });
 
         Ok(link)
     }
@@ -562,5 +735,63 @@ mod tests {
         }
 
         let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn test_vcs_init_and_commit() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let graph_path = tmp.path().join("graph.json");
+        let mut store = GraphStore::open(&graph_path).unwrap();
+
+        // No VCS initially
+        assert!(store.repo.is_none());
+        assert!(!store.has_pending_changes());
+
+        // Init VCS
+        store.vcs_init().unwrap();
+        assert!(store.repo.is_some());
+
+        // Make changes — should now track
+        store
+            .create_node("root", "detail", "VCS tracked", None, None)
+            .unwrap();
+        assert!(store.has_pending_changes());
+        assert_eq!(store.pending_changes().len(), 1);
+
+        // Commit
+        let hash = store
+            .commit(CommitInput {
+                message: "First tracked commit".to_string(),
+                source: crate::vcs::types::CommitSource::Manual { tool_name: None },
+            })
+            .unwrap();
+
+        assert!(!store.has_pending_changes());
+
+        // Log should have 2 entries
+        let log = store.get_repo().unwrap().log(None).unwrap();
+        assert_eq!(log.len(), 2);
+        assert_eq!(log[0].hash, hash);
+    }
+
+    #[test]
+    fn test_vcs_discard_changes() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let graph_path = tmp.path().join("graph.json");
+        let mut store = GraphStore::open(&graph_path).unwrap();
+        store.vcs_init().unwrap();
+
+        let initial_count = store.graph.nodes.len();
+
+        // Make changes
+        store
+            .create_node("root", "detail", "Will be discarded", None, None)
+            .unwrap();
+        assert_eq!(store.graph.nodes.len(), initial_count + 1);
+
+        // Discard
+        store.discard_changes().unwrap();
+        assert_eq!(store.graph.nodes.len(), initial_count);
+        assert!(!store.has_pending_changes());
     }
 }

@@ -4,36 +4,15 @@ import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import sharp from "sharp";
+import { BLOCKED_BUILTIN_TOOLS, getDisallowedTools } from "./agent-tools.js";
 import { LineBuffer } from "./line-buffer.js";
+
+export { BLOCKED_BUILTIN_TOOLS };
 
 const BASE_TEMP_DIR = join(tmpdir(), "willow-cli");
 const LLM_MODEL = process.env.LLM_MODEL || "claude-opus-4-6";
 const CLI_IMAGE_MAX_DIM = 1536;
 const CLI_IMAGE_QUALITY = 80;
-
-export const BLOCKED_BUILTIN_TOOLS = [
-	"Bash",
-	"Read",
-	"Write",
-	"Edit",
-	"Glob",
-	"Grep",
-	"WebFetch",
-	"WebSearch",
-	"Task",
-	"TaskOutput",
-	"NotebookEdit",
-	"EnterPlanMode",
-	"ExitPlanMode",
-	"TodoWrite",
-	"AskUserQuestion",
-	"Skill",
-	"TeamCreate",
-	"TeamDelete",
-	"SendMessage",
-	"TaskStop",
-	"ToolSearch",
-];
 
 export function getCliModel(model: string): string {
 	if (model.includes("opus")) return "opus";
@@ -151,10 +130,236 @@ rl.on("line", (line) => {
 	return writeTempFile(dir, "image-viewer-mcp.js", script);
 }
 
+export interface CoordinatorConfig {
+	/** Path to the event socket for sub-agent event forwarding. */
+	eventSocketPath: string;
+	/** Path to the willow MCP server entry point (for the search sub-agent). */
+	mcpServerPath: string;
+}
+
+function writeCoordinatorMcp(dir: string, config: CoordinatorConfig): string {
+	const graphPath =
+		process.env.WILLOW_GRAPH_PATH ||
+		join(process.env.HOME || "~", ".willow", "graph.json");
+
+	const script = `#!/usr/bin/env node
+const { spawn } = require("child_process");
+const readline = require("readline");
+const net = require("net");
+const fs = require("fs");
+const os = require("os");
+const path = require("path");
+const crypto = require("crypto");
+
+const MCP_SERVER_PATH = ${JSON.stringify(config.mcpServerPath)};
+const EVENT_SOCKET_PATH = ${JSON.stringify(config.eventSocketPath)};
+const GRAPH_PATH = ${JSON.stringify(graphPath)};
+
+const SEARCH_SYSTEM_PROMPT = \`You are a memory search agent. Your ONLY job is to explore a knowledge graph and find information relevant to the user's message.
+
+STRATEGY:
+1. Start with get_context on the root node (depth 2) to see the graph overview.
+2. Use search_nodes with varied queries related to the user's message — try synonyms, related concepts, and broader/narrower terms.
+3. When you find promising nodes, use get_context to drill into them and see related information.
+4. After exploring, output your findings inside <memory_context> tags.
+
+RULES:
+- You have read-only access — only use search_nodes and get_context.
+- Be thorough but efficient — try 2-4 different search queries.
+- If the graph is empty or nothing relevant is found, say so.
+- Do NOT respond to the user. Only explore and summarize.
+
+After exploring, output EXACTLY this format:
+<memory_context>
+[Your summary of all relevant facts found, organized by topic. Include node IDs for reference. If nothing relevant was found, write "No relevant memories found."]
+</memory_context>\`;
+
+const BLOCKED = ${JSON.stringify(getDisallowedTools("search"))};
+
+const rl = readline.createInterface({ input: process.stdin, terminal: false });
+function send(msg) { process.stdout.write(JSON.stringify(msg) + "\\n"); }
+
+function sendToSocket(event, data) {
+  try {
+    const conn = net.createConnection(EVENT_SOCKET_PATH);
+    conn.write(JSON.stringify({ event, data }) + "\\n");
+    conn.end();
+  } catch {}
+}
+
+function runSearchAgent(query) {
+  return new Promise((resolve) => {
+    const invDir = path.join(os.tmpdir(), "willow-cli", crypto.randomUUID().slice(0, 12));
+    fs.mkdirSync(invDir, { recursive: true });
+
+    const mcpConfigPath = path.join(invDir, "mcp-config.json");
+    fs.writeFileSync(mcpConfigPath, JSON.stringify({
+      mcpServers: {
+        willow: { type: "stdio", command: "node", args: [MCP_SERVER_PATH], env: { WILLOW_GRAPH_PATH: GRAPH_PATH } }
+      }
+    }));
+
+    const systemPromptPath = path.join(invDir, "system-prompt.txt");
+    const suffix = "\\nIMPORTANT CONSTRAINTS:\\n- Only use MCP tools prefixed with mcp__willow__ to manage the knowledge graph.\\n- Never attempt to use filesystem, code editing, web browsing, or any non-MCP tools.\\n- When you need to perform multiple knowledge graph operations, make all tool calls in parallel within a single response.";
+    fs.writeFileSync(systemPromptPath, SEARCH_SYSTEM_PROMPT + suffix);
+
+    const prompt = "Find information relevant to this user message:\\n\\n" + query;
+    const args = [
+      "--print", "--output-format", "stream-json", "--verbose", "--include-partial-messages",
+      "--model", "opus", "--dangerously-skip-permissions",
+      "--mcp-config", mcpConfigPath, "--strict-mcp-config",
+      "--disallowedTools", ...BLOCKED,
+      "--append-system-prompt-file", systemPromptPath,
+      "--setting-sources", "", "--no-session-persistence", "--max-turns", "5",
+      prompt,
+    ];
+
+    let proc;
+    try {
+      proc = spawn("claude", args, {
+        cwd: invDir,
+        env: { PATH: process.env.PATH, HOME: process.env.HOME, SHELL: process.env.SHELL, TERM: process.env.TERM },
+        stdio: ["pipe", "pipe", "pipe"],
+      });
+    } catch {
+      cleanup(invDir);
+      resolve("");
+      return;
+    }
+
+    proc.stdin.end();
+    let textOutput = "";
+    let lineBuf = "";
+    // Per-block tracking for tool call args accumulation
+    const blockMeta = new Map(); // index -> { id, name, argsJson }
+
+    proc.stdout.on("data", (chunk) => {
+      lineBuf += chunk.toString();
+      const lines = lineBuf.split("\\n");
+      lineBuf = lines.pop() || "";
+      for (const raw of lines) {
+        const trimmed = raw.trim();
+        if (!trimmed) continue;
+        let msg;
+        try { msg = JSON.parse(trimmed); } catch { continue; }
+        if (msg.type !== "stream_event") continue;
+        const evt = msg.event;
+        if (!evt) continue;
+
+        if (evt.type === "content_block_start" && evt.content_block) {
+          if (evt.content_block.type === "tool_use") {
+            const tcId = "search__" + (evt.content_block.id || "tool_" + evt.index);
+            const tcName = evt.content_block.name || "unknown";
+            blockMeta.set(evt.index, { id: tcId, name: tcName, argsJson: "" });
+            sendToSocket("tool_call_start", JSON.stringify({ toolCallId: tcId, toolName: tcName }));
+          }
+        } else if (evt.type === "content_block_delta" && evt.delta) {
+          if (evt.delta.type === "text_delta" && evt.delta.text) {
+            textOutput += evt.delta.text;
+          } else if (evt.delta.type === "input_json_delta" && evt.delta.partial_json !== undefined) {
+            const bm = blockMeta.get(evt.index);
+            if (bm) bm.argsJson += evt.delta.partial_json;
+          }
+        } else if (evt.type === "content_block_stop") {
+          const bm = blockMeta.get(evt.index);
+          if (bm) {
+            let args = {};
+            try { args = bm.argsJson ? JSON.parse(bm.argsJson) : {}; } catch {}
+            sendToSocket("tool_call_args", JSON.stringify({ toolCallId: bm.id, toolName: bm.name, args }));
+            blockMeta.delete(evt.index);
+          }
+        } else if (evt.type === "message_start" && evt.message && evt.message.role === "user") {
+          // Handle tool results from user messages
+          const content = evt.message.content;
+          if (Array.isArray(content)) {
+            for (const block of content) {
+              if (block.type === "tool_result") {
+                const tcId = "search__" + block.tool_use_id;
+                const result = typeof block.content === "string" ? block.content :
+                  Array.isArray(block.content) ? block.content.map(c => c.text || "").join("") : "";
+                sendToSocket("tool_result", JSON.stringify({ toolCallId: tcId, result, isError: block.is_error === true }));
+              }
+            }
+          }
+        }
+      }
+    });
+
+    proc.stderr.on("data", () => {});
+
+    const finish = () => {
+      cleanup(invDir);
+      const match = textOutput.match(/<memory_context>([\\s\\S]*?)<\\/memory_context>/);
+      resolve(match ? match[1].trim() : "");
+    };
+
+    proc.on("close", finish);
+    proc.on("error", finish);
+  });
+}
+
+function cleanup(dir) {
+  try { fs.rmSync(dir, { recursive: true, force: true }); } catch {}
+}
+
+rl.on("line", async (line) => {
+  let req;
+  try { req = JSON.parse(line); } catch { return; }
+  const id = req.id;
+
+  switch (req.method) {
+    case "initialize":
+      send({ jsonrpc: "2.0", id, result: {
+        protocolVersion: "2024-11-05",
+        capabilities: { tools: {} },
+        serverInfo: { name: "coordinator", version: "1.0.0" },
+      }});
+      break;
+    case "notifications/initialized":
+      break;
+    case "tools/list":
+      send({ jsonrpc: "2.0", id, result: { tools: [{
+        name: "search_memories",
+        description: "Search the user's memory graph for information relevant to a query. Spawns a search agent that explores the graph using multiple strategies and returns a summary of relevant facts.",
+        inputSchema: {
+          type: "object",
+          properties: { query: { type: "string", description: "What to search for in the user's memories" } },
+          required: ["query"],
+        },
+      }]}});
+      break;
+    case "tools/call": {
+      const toolName = req.params?.name;
+      const query = req.params?.arguments?.query || "";
+      if (toolName === "search_memories") {
+        sendToSocket("search_phase", JSON.stringify({ status: "start" }));
+        const result = await runSearchAgent(query);
+        sendToSocket("search_phase", JSON.stringify({ status: "end" }));
+        send({ jsonrpc: "2.0", id, result: {
+          content: [{ type: "text", text: result || "No relevant memories found." }],
+        }});
+      } else {
+        send({ jsonrpc: "2.0", id, error: { code: -32601, message: "Unknown tool: " + toolName } });
+      }
+      break;
+    }
+    default:
+      if (id !== undefined) {
+        send({ jsonrpc: "2.0", id, error: { code: -32601, message: "Method not found" } });
+      }
+  }
+});
+`;
+	return writeTempFile(dir, "coordinator-mcp.js", script);
+}
+
 export function writeMcpConfig(
 	dir: string,
 	mcpServerPath: string,
-	imagePaths?: string[],
+	options?: {
+		imagePaths?: string[];
+		coordinator?: CoordinatorConfig;
+	},
 ): string {
 	const graphPath =
 		process.env.WILLOW_GRAPH_PATH ||
@@ -169,12 +374,21 @@ export function writeMcpConfig(
 		},
 	};
 
-	if (imagePaths && imagePaths.length > 0) {
-		const scriptPath = writeImageViewerMcp(dir, imagePaths);
+	if (options?.imagePaths && options.imagePaths.length > 0) {
+		const scriptPath = writeImageViewerMcp(dir, options.imagePaths);
 		servers.images = {
 			type: "stdio",
 			command: "node",
 			args: [scriptPath],
+		};
+	}
+
+	if (options?.coordinator) {
+		const coordinatorPath = writeCoordinatorMcp(dir, options.coordinator);
+		servers.coordinator = {
+			type: "stdio",
+			command: "node",
+			args: [coordinatorPath],
 		};
 	}
 
@@ -222,6 +436,8 @@ export interface CliChatOptions {
 	newImages?: string[];
 	/** Tools to block — defaults to BLOCKED_BUILTIN_TOOLS if not provided. */
 	disallowedTools?: string[];
+	/** Coordinator MCP config for sub-agent communication. */
+	coordinator?: CoordinatorConfig;
 }
 
 function buildPrompt(messages: CliMessage[], newImages?: string[]): string {
@@ -542,11 +758,10 @@ async function prepareInvocation(options: CliChatOptions): Promise<{
 			: undefined;
 
 	// MCP config gets ALL images so Claude can re-view if needed
-	const mcpConfigPath = writeMcpConfig(
-		invocationDir,
-		options.mcpServerPath,
-		cliImagePaths,
-	);
+	const mcpConfigPath = writeMcpConfig(invocationDir, options.mcpServerPath, {
+		imagePaths: cliImagePaths,
+		coordinator: options.coordinator,
+	});
 	// Prompt only instructs Claude to view NEW images
 	const prompt =
 		buildPrompt(options.messages, cliNewImagePaths) ||

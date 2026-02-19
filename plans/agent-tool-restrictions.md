@@ -1,96 +1,60 @@
 # Plan: Centralized Agent Tool Permissions (Allowlist)
 
+## Status: IMPLEMENTED
+
 ## Context
 
-Tool restrictions are currently scattered across 3 agent files (`chat.ts`, `search-agent.ts`, `indexer.ts`), each manually maintaining its own blocklist. This is fragile — when a new willow tool is added, every agent's blocklist must be updated or the new tool leaks through. We'll centralize permissions using an **allowlist** approach: each agent declares only the tools it CAN use, and the disallowed list is computed automatically. `BLOCKED_BUILTIN_TOOLS` (the Claude CLI workaround) stays as-is.
+Tool restrictions were scattered across 4 agent files, each manually maintaining its own blocklist. When VCS tools (`commit`, `graph_log`, `show_commit`) were added, no blocklist was updated — they leaked through to all agents. We centralized permissions using an **allowlist** approach in `agent-tools.ts`.
+
+## All Willow MCP Tools (9 total)
+
+**Graph tools (6):** `search_nodes`, `get_context`, `create_node`, `update_node`, `delete_node`, `add_link`
+**VCS tools (3):** `commit`, `graph_log`, `show_commit`
 
 ## Agent Tool Domains
 
-| Agent | Allowed Willow Tools | Purpose |
-|-------|---------------------|---------|
-| **chat** | `get_context` | Read-only recall (search done by search agent) |
-| **search** | `search_nodes`, `get_context` | Read-only graph exploration |
-| **indexer** | All 6 tools | Read + write for knowledge extraction |
-| **maintenance** | All 6 tools | Read + write for graph cleanup/optimization |
+| Agent | Willow Tools | Other Tools | Purpose |
+|-------|-------------|-------------|---------|
+| **chat** | _(none)_ | `search_memories`, `view_image` (coordinator) | Conversational — delegates all graph access to search agent |
+| **search** | `search_nodes`, `get_context` | _(none)_ | Read-only graph exploration |
+| **indexer** | `search_nodes`, `create_node`, `update_node`, `delete_node`, `add_link` | _(none)_ | Graph writes for knowledge extraction (commit handled by orchestrator) |
+| **maintenance** | `search_nodes`, `get_context`, `create_node`, `update_node`, `delete_node`, `add_link` | _(none)_ | Direct graph cleanup (commit handled by orchestrator, no coordinator overhead) |
 
-## Changes
+## Changes Made
 
-### 1. Create `packages/chat/src/server/services/agent-tools.ts`
+### 1. Created `packages/chat/src/server/services/agent-tools.ts`
 
-Central agent tool permission registry:
+Central registry with `BLOCKED_BUILTIN_TOOLS`, `ALL_WILLOW_TOOLS`, and `getDisallowedTools(agent)`.
 
-```ts
-import { BLOCKED_BUILTIN_TOOLS } from "./cli-chat.js";
+### 2. Updated `packages/chat/src/server/services/cli-chat.ts`
 
-// All willow MCP tools — single source of truth
-const ALL_WILLOW_TOOLS = [
-  "mcp__willow__search_nodes",
-  "mcp__willow__get_context",
-  "mcp__willow__create_node",
-  "mcp__willow__update_node",
-  "mcp__willow__delete_node",
-  "mcp__willow__add_link",
-] as const;
+- Moved `BLOCKED_BUILTIN_TOOLS` to `agent-tools.ts`, re-exports for backward compat
+- Coordinator MCP inline `BLOCKED` list now uses `getDisallowedTools("search")`
 
-type AgentName = "chat" | "search" | "indexer" | "maintenance";
+### 3. Updated `packages/chat/src/server/routes/chat.ts`
 
-// Allowlist: each agent declares ONLY the willow tools it may use
-const AGENT_ALLOWED_TOOLS: Record<AgentName, readonly string[]> = {
-  chat:        ["mcp__willow__get_context"],
-  search:      ["mcp__willow__search_nodes", "mcp__willow__get_context"],
-  indexer:     [...ALL_WILLOW_TOOLS],
-  maintenance: [...ALL_WILLOW_TOOLS],
-};
+- Removed `CHAT_DISALLOWED_TOOLS` array
+- Uses `getDisallowedTools("chat")` — blocks ALL willow tools (chat has no direct graph access)
+- Removed `get_context` reference from system prompt
 
-/**
- * Returns the full disallowed tools list for an agent:
- * BLOCKED_BUILTIN_TOOLS + any willow tools NOT in the agent's allowlist.
- */
-export function getDisallowedTools(agent: AgentName): string[] {
-  const allowed = new Set(AGENT_ALLOWED_TOOLS[agent]);
-  const blockedWillow = ALL_WILLOW_TOOLS.filter((t) => !allowed.has(t));
-  return [...BLOCKED_BUILTIN_TOOLS, ...blockedWillow];
-}
-```
+### 4. Updated `packages/chat/src/server/services/search-agent.ts`
 
-### 2. Update `packages/chat/src/server/routes/chat.ts`
+- Removed `SEARCH_DISALLOWED_TOOLS` array
+- Uses `getDisallowedTools("search")` — now also blocks VCS tools
 
-- Remove the `CHAT_DISALLOWED_TOOLS` array (lines 48-55)
-- Import `getDisallowedTools` from `agent-tools.ts`
-- Replace `disallowedTools: CHAT_DISALLOWED_TOOLS` with `disallowedTools: getDisallowedTools("chat")`
+### 5. Updated `packages/chat/src/server/services/indexer.ts`
 
-### 3. Update `packages/chat/src/server/services/search-agent.ts`
+- Uses `getDisallowedTools("indexer")` — blocks `get_context` + all VCS tools
 
-- Remove the `SEARCH_DISALLOWED_TOOLS` array (lines 34-40)
-- Import `getDisallowedTools` from `agent-tools.ts`
-- Replace `...SEARCH_DISALLOWED_TOOLS` in the args array (line 84) with `...getDisallowedTools("search")`
+### 6. Updated `packages/chat/src/server/services/maintenance.ts`
 
-### 4. Update `packages/chat/src/server/services/indexer.ts`
+- Removed coordinator MCP and event socket — maintenance now calls `search_nodes` directly
+- Uses `getDisallowedTools("maintenance")` — blocks all VCS tools
+- Updated system prompt: `search_memories` → `search_nodes`
 
-- Import `getDisallowedTools` from `agent-tools.ts`
-- Replace `...BLOCKED_BUILTIN_TOOLS` in the args array (line 80) with `...getDisallowedTools("indexer")`
-- Remove the `BLOCKED_BUILTIN_TOOLS` import (no longer needed directly)
+## Key Design Decisions
 
-### 5. Future: `maintenance.ts`
-
-When the maintenance agent is built, it will simply use `getDisallowedTools("maintenance")` — no need to manually track tool permissions.
-
-## Key Files
-
-| File | Action |
-|------|--------|
-| `packages/chat/src/server/services/agent-tools.ts` | **Create** — central registry |
-| `packages/chat/src/server/routes/chat.ts` | **Modify** — use registry for chat agent |
-| `packages/chat/src/server/services/search-agent.ts` | **Modify** — use registry for search agent |
-| `packages/chat/src/server/services/indexer.ts` | **Modify** — use registry for indexer agent |
-| `packages/chat/src/server/services/cli-chat.ts` | **No change** — `BLOCKED_BUILTIN_TOOLS` stays here, still exported |
-
-## Verification
-
-1. `pnpm typecheck` — ensure no type errors
-2. `pnpm build` — full build passes
-3. `pnpm dev` — start the app, send a message, verify:
-   - Search agent: makes `search_nodes`/`get_context` calls only
-   - Chat agent: makes `get_context` calls only (no search_nodes)
-   - Indexer agent: makes create/update/delete/add_link calls as needed
-4. Check tool call events in browser devtools (SSE stream) to confirm no unexpected tools appear
+- **Chat gets zero willow tools.** `search_memories` (coordinator) is its only graph access path.
+- **No agent gets VCS tools.** Both indexer and maintenance commits are handled programmatically by their orchestrators (`agentic-stream.ts` and `maintenance.ts` respectively).
+- **Maintenance dropped the coordinator.** Direct `search_nodes` is simpler and avoids spawning a search agent subprocess.
+- **Indexer dropped `get_context`.** Search results include node IDs and paths — sufficient for placement decisions.

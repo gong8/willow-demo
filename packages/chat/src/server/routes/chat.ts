@@ -3,8 +3,13 @@ import { PrismaClient } from "@prisma/client";
 import { Hono } from "hono";
 import { streamSSE } from "hono/streaming";
 import { z } from "zod";
-import { BLOCKED_BUILTIN_TOOLS } from "../services/cli-chat.js";
-import { createCombinedStream } from "../services/combined-stream.js";
+import { getDisallowedTools } from "../services/agent-tools.js";
+import { createAgenticStream } from "../services/agentic-stream.js";
+import {
+	getMaintenanceStatus,
+	notifyConversationComplete,
+	runMaintenance,
+} from "../services/maintenance.js";
 import {
 	getStream,
 	startStream,
@@ -23,10 +28,10 @@ const CHAT_SYSTEM_PROMPT = `You are Willow, a personal knowledge assistant with 
 
 <memory_behavior>
 RECALLING FACTS:
-Relevant memories are automatically retrieved and provided to you in <retrieved_memories> tags before you respond. Use this context to answer naturally.
-- If you need more detail on a specific node, use get_context to drill into it.
-- Be transparent: "I remember you mentioned..." or "I don't have that in my memory yet"
-- Do NOT search for information yourself — the search agent handles that automatically.
+- Use search_memories to search your memory when the user asks about something you might know, or when recalling information would help your response.
+- For simple greetings or general chat, don't search.
+- You can search multiple times with different queries if needed.
+- Be transparent: "I remember you mentioned..." or "I don't have that in my memory yet."
 
 Memory updates happen automatically in the background — you don't need to store, update, or organize facts.
 </memory_behavior>
@@ -43,15 +48,6 @@ Memory updates happen automatically in the background — you don't need to stor
 - Keep responses appropriately sized — short for simple facts, longer for complex discussions
 - Use bullet points for lists of remembered facts
 </formatting>`;
-
-const CHAT_DISALLOWED_TOOLS = [
-	...BLOCKED_BUILTIN_TOOLS,
-	"mcp__willow__search_nodes",
-	"mcp__willow__create_node",
-	"mcp__willow__update_node",
-	"mcp__willow__delete_node",
-	"mcp__willow__add_link",
-];
 
 const streamRequestSchema = z.object({
 	conversationId: z.string(),
@@ -232,7 +228,7 @@ chatRoutes.post("/stream", async (c) => {
 				.filter((p): p is string => p !== null)
 		: [];
 
-	const cliStream = createCombinedStream({
+	const cliStream = createAgenticStream({
 		chatOptions: {
 			messages: history as Array<{
 				role: "system" | "user" | "assistant";
@@ -242,14 +238,34 @@ chatRoutes.post("/stream", async (c) => {
 			mcpServerPath: MCP_SERVER_PATH,
 			images: allImagePaths.length > 0 ? allImagePaths : undefined,
 			newImages: newImagePaths.length > 0 ? newImagePaths : undefined,
-			disallowedTools: CHAT_DISALLOWED_TOOLS,
+			disallowedTools: getDisallowedTools("chat"),
 		},
 		userMessage: message,
 		mcpServerPath: MCP_SERVER_PATH,
+		conversationId,
 	});
 
-	startStream(conversationId, cliStream, db);
+	startStream(conversationId, cliStream, db, () => {
+		notifyConversationComplete(MCP_SERVER_PATH);
+	});
 	return pipeStreamToSSE(c, conversationId);
+});
+
+// Maintenance status
+chatRoutes.get("/maintenance/status", (c) => {
+	return c.json(getMaintenanceStatus());
+});
+
+// Trigger maintenance manually
+chatRoutes.post("/maintenance/run", (c) => {
+	const job = runMaintenance({
+		trigger: "manual",
+		mcpServerPath: MCP_SERVER_PATH,
+	});
+	if (!job) {
+		return c.json({ error: "Maintenance already running" }, 409);
+	}
+	return c.json({ jobId: job.id });
 });
 
 function pipeStreamToSSE(

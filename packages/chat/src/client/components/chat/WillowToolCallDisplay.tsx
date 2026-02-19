@@ -26,6 +26,9 @@ function isIndexerToolCall(toolCallId: string): boolean {
  */
 function SearchToolCallHandler(props: ToolCallMessagePartProps) {
 	const content = useMessage((m) => m.content);
+	const metaSearchPart = useMessage(
+		(m) => m.metadata?.custom?.searchResults as SearchResultsPart | undefined,
+	);
 
 	const { isFirst, searchPart } = useMemo(() => {
 		let first: string | null = null;
@@ -36,12 +39,9 @@ function SearchToolCallHandler(props: ToolCallMessagePartProps) {
 			}
 		}
 
-		// Look for a search-results custom part
-		for (const part of content) {
-			const p = part as unknown as SearchResultsPart;
-			if (p.type === "search-results") {
-				return { isFirst: first === props.toolCallId, searchPart: p };
-			}
+		// Check metadata for search results
+		if (metaSearchPart) {
+			return { isFirst: first === props.toolCallId, searchPart: metaSearchPart };
 		}
 
 		// Fallback: build from individual tool calls
@@ -69,7 +69,7 @@ function SearchToolCallHandler(props: ToolCallMessagePartProps) {
 						} as SearchResultsPart)
 					: null,
 		};
-	}, [content, props.toolCallId]);
+	}, [content, props.toolCallId, metaSearchPart]);
 
 	if (!isFirst || !searchPart) return null;
 
@@ -82,6 +82,9 @@ function SearchToolCallHandler(props: ToolCallMessagePartProps) {
  */
 function IndexerToolCallHandler(props: ToolCallMessagePartProps) {
 	const content = useMessage((m) => m.content);
+	const metaIndexerPart = useMessage(
+		(m) => m.metadata?.custom?.indexerResults as IndexerResultsPart | undefined,
+	);
 
 	const { isFirst, indexerPart } = useMemo(() => {
 		let first: string | null = null;
@@ -92,12 +95,9 @@ function IndexerToolCallHandler(props: ToolCallMessagePartProps) {
 			}
 		}
 
-		// Look for an indexer-results custom part
-		for (const part of content) {
-			const p = part as unknown as IndexerResultsPart;
-			if (p.type === "indexer-results") {
-				return { isFirst: first === props.toolCallId, indexerPart: p };
-			}
+		// Check metadata for indexer results
+		if (metaIndexerPart) {
+			return { isFirst: first === props.toolCallId, indexerPart: metaIndexerPart };
 		}
 
 		// Fallback: build from individual tool calls
@@ -125,7 +125,7 @@ function IndexerToolCallHandler(props: ToolCallMessagePartProps) {
 						} as IndexerResultsPart)
 					: null,
 		};
-	}, [content, props.toolCallId]);
+	}, [content, props.toolCallId, metaIndexerPart]);
 
 	if (!isFirst || !indexerPart) return null;
 

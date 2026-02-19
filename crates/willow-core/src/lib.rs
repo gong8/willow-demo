@@ -7,3 +7,4 @@ mod napi_exports;
 mod search;
 mod storage;
 mod store;
+pub mod vcs;

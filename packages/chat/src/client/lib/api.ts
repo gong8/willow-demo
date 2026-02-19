@@ -54,3 +54,38 @@ export async function fetchMessages(
 	);
 	return res.json();
 }
+
+export interface MaintenanceToolCall {
+	toolCallId: string;
+	toolName: string;
+	args: Record<string, unknown>;
+	result?: string;
+	isError?: boolean;
+}
+
+export interface MaintenanceJob {
+	id: string;
+	status: "running" | "complete" | "error";
+	trigger: "manual" | "auto";
+	toolCalls: MaintenanceToolCall[];
+	startedAt: string;
+	completedAt?: string;
+}
+
+export interface MaintenanceStatus {
+	currentJob: MaintenanceJob | null;
+	conversationsSinceLastMaintenance: number;
+	threshold: number;
+}
+
+export async function fetchMaintenanceStatus(): Promise<MaintenanceStatus> {
+	const res = await fetch(`${BASE_URL}/chat/maintenance/status`);
+	return res.json();
+}
+
+export async function triggerMaintenance(): Promise<{ jobId: string }> {
+	const res = await fetch(`${BASE_URL}/chat/maintenance/run`, {
+		method: "POST",
+	});
+	return res.json();
+}
