@@ -1,0 +1,11 @@
+node_modules/
+dist/
+target/
+*.node
+.turbo/
+.env
+.env.local
+*.tsbuildinfo
+packages/chat/data/
+index.js
+index.d.ts

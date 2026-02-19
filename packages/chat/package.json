@@ -1,0 +1,46 @@
+{
+	"name": "@willow/chat",
+	"version": "0.1.0",
+	"private": true,
+	"type": "module",
+	"scripts": {
+		"dev": "concurrently \"vite\" \"tsx watch src/server/index.ts\"",
+		"dev:server": "tsx watch src/server/index.ts",
+		"dev:client": "vite",
+		"build": "prisma generate && tsc -b && vite build",
+		"build:server": "tsc -b",
+		"typecheck": "tsc --noEmit",
+		"db:push": "prisma db push",
+		"db:studio": "prisma studio",
+		"postinstall": "prisma generate"
+	},
+	"dependencies": {
+		"@assistant-ui/react": "^0.12.10",
+		"@assistant-ui/react-markdown": "^0.12.3",
+		"@hono/node-server": "^1.19.9",
+		"@prisma/client": "^6.6.0",
+		"@tanstack/react-query": "^5.66.0",
+		"hono": "^4.7.4",
+		"lucide-react": "^0.474.0",
+		"react": "^19.0.0",
+		"react-dom": "^19.0.0",
+		"react-markdown": "^10.1.0",
+		"reagraph": "^4.30.8",
+		"remark-gfm": "^4.0.1",
+		"sharp": "^0.34.5",
+		"zod": "^3.24.2"
+	},
+	"devDependencies": {
+		"@tailwindcss/typography": "^0.5.19",
+		"@tailwindcss/vite": "^4.0.6",
+		"@types/react": "^19.0.8",
+		"@types/react-dom": "^19.0.3",
+		"@vitejs/plugin-react": "^4.3.4",
+		"concurrently": "^9.1.2",
+		"prisma": "^6.6.0",
+		"tailwindcss": "^4.0.6",
+		"tsx": "^4.19.2",
+		"typescript": "^5.7.2",
+		"vite": "^6.1.0"
+	}
+}

@@ -1,0 +1,26 @@
+{
+	"name": "@willow/mcp-server",
+	"version": "0.1.0",
+	"private": true,
+	"type": "module",
+	"main": "dist/index.js",
+	"bin": {
+		"willow-mcp": "dist/index.js"
+	},
+	"scripts": {
+		"build": "tsc",
+		"dev": "tsx src/index.ts",
+		"typecheck": "tsc --noEmit"
+	},
+	"dependencies": {
+		"@modelcontextprotocol/sdk": "^1.12.1",
+		"@willow/core": "workspace:*",
+		"@willow/shared": "workspace:*",
+		"zod": "^3.24.2",
+		"zod-to-json-schema": "^3.24.5"
+	},
+	"devDependencies": {
+		"tsx": "^4.19.2",
+		"typescript": "^5.7.2"
+	}
+}
