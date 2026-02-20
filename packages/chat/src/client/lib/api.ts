@@ -293,9 +293,6 @@ export function fetchLocalDiff(): Promise<ChangeSummary> {
 	return fetchJson("/graph/status/diff");
 }
 
-export function diffCommits(
-	from: string,
-	to: string,
-): Promise<ChangeSummary> {
+export function diffCommits(from: string, to: string): Promise<ChangeSummary> {
 	return fetchJson(`/graph/diff?from=${from}&to=${to}`);
 }

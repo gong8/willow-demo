@@ -109,8 +109,7 @@ export function transformGraphData(
 
 	for (const link of Object.values(graph.links)) {
 		// Count all links for stats (regardless of visibility)
-		linksByRelation[link.relation] =
-			(linksByRelation[link.relation] ?? 0) + 1;
+		linksByRelation[link.relation] = (linksByRelation[link.relation] ?? 0) + 1;
 		relationTypes.add(link.relation);
 
 		if (!visibleIds.has(link.from_node) || !visibleIds.has(link.to_node))

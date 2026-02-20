@@ -7,8 +7,8 @@ import {
 	Wrench,
 } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
-import type { MaintenanceProgress } from "../../lib/api.js";
 import { useMaintenanceStatus } from "../../hooks/useMaintenanceStatus.js";
+import type { MaintenanceProgress } from "../../lib/api.js";
 
 const PHASE_WEIGHTS = {
 	"pre-scan": { start: 0, weight: 5 },
@@ -64,19 +64,29 @@ function ProgressBar({
 						? "w-full animate-pulse bg-violet-500/60"
 						: "bg-violet-500"
 				}`}
-				style={indeterminate ? undefined : { width: `${Math.min(percent, 100)}%` }}
+				style={
+					indeterminate ? undefined : { width: `${Math.min(percent, 100)}%` }
+				}
 			/>
 		</div>
 	);
 }
 
-function ProgressPanel({ progress, job }: { progress: MaintenanceProgress; job: { status: string; startedAt: string; completedAt?: string } }) {
+function ProgressPanel({
+	progress,
+	job,
+}: {
+	progress: MaintenanceProgress;
+	job: { status: string; startedAt: string; completedAt?: string };
+}) {
 	const percent = computeOverallPercent(progress);
 	const eta = computeEta(progress);
 	const isResolving = progress.phase === "resolving";
 	const isDone = progress.phase === "done" || job.status === "complete";
 	const elapsed = job.completedAt
-		? formatDuration(new Date(job.completedAt).getTime() - new Date(job.startedAt).getTime())
+		? formatDuration(
+				new Date(job.completedAt).getTime() - new Date(job.startedAt).getTime(),
+			)
 		: formatDuration(Date.now() - new Date(job.startedAt).getTime());
 
 	return (
@@ -91,28 +101,38 @@ function ProgressPanel({ progress, job }: { progress: MaintenanceProgress; job: 
 					<span className="text-foreground">{progress.phaseLabel}</span>
 				</div>
 				<span className="text-muted-foreground text-xs tabular-nums">
-					{isDone ? elapsed : eta ?? `${percent}%`}
+					{isDone ? elapsed : (eta ?? `${percent}%`)}
 				</span>
 			</div>
-			<ProgressBar percent={isDone ? 100 : percent} indeterminate={isResolving} />
+			<ProgressBar
+				percent={isDone ? 100 : percent}
+				indeterminate={isResolving}
+			/>
 			<div className="text-xs text-muted-foreground tabular-nums">
 				{progress.phase === "crawling" && progress.crawlersTotal > 0 && (
 					<span>
-						{progress.crawlersComplete} of {progress.crawlersTotal} crawlers complete
-						{progress.totalFindings > 0 && <> &middot; {progress.totalFindings} findings</>}
+						{progress.crawlersComplete} of {progress.crawlersTotal} crawlers
+						complete
+						{progress.totalFindings > 0 && (
+							<> &middot; {progress.totalFindings} findings</>
+						)}
 					</span>
 				)}
 				{progress.phase === "resolving" && (
 					<span>
-						{progress.totalFindings} findings &middot; {progress.resolverActions} actions
+						{progress.totalFindings} findings &middot;{" "}
+						{progress.resolverActions} actions
 					</span>
 				)}
 				{isDone && (
 					<span>
-						{progress.totalFindings} findings &middot; {progress.resolverActions} actions &middot; {elapsed}
+						{progress.totalFindings} findings &middot;{" "}
+						{progress.resolverActions} actions &middot; {elapsed}
 					</span>
 				)}
-				{progress.phase === "pre-scan" && <span>Analyzing graph structure...</span>}
+				{progress.phase === "pre-scan" && (
+					<span>Analyzing graph structure...</span>
+				)}
 				{progress.phase === "committing" && <span>Saving changes...</span>}
 			</div>
 		</div>
@@ -158,7 +178,11 @@ export function MaintenanceIndicator() {
 					}
 				}}
 				className="flex items-center gap-1.5 rounded-md border border-border bg-background px-2.5 py-1.5 text-sm text-muted-foreground transition-colors hover:bg-accent/50 hover:text-foreground"
-				title={isRunning ? "Maintenance running — click to see details" : "Run graph maintenance"}
+				title={
+					isRunning
+						? "Maintenance running — click to see details"
+						: "Run graph maintenance"
+				}
 			>
 				{isRunning ? (
 					<Loader2 className="h-3.5 w-3.5 animate-spin text-violet-500" />
@@ -169,11 +193,7 @@ export function MaintenanceIndicator() {
 				) : (
 					<Wrench className="h-3.5 w-3.5" />
 				)}
-				<span>
-					{isRunning && progress
-						? `${percent}%`
-						: "Maintain"}
-				</span>
+				<span>{isRunning && progress ? `${percent}%` : "Maintain"}</span>
 				{job &&
 					(expanded ? (
 						<ChevronDown className="h-3 w-3" />

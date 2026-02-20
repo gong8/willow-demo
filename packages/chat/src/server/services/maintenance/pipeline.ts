@@ -76,9 +76,7 @@ export async function runMaintenancePipeline(options: {
 		phaseStartedAt: Date.now(),
 	};
 
-	const emitProgress = (
-		updates: Partial<MaintenanceProgress>,
-	) => {
+	const emitProgress = (updates: Partial<MaintenanceProgress>) => {
 		Object.assign(progress, updates);
 		options.onProgress?.({ ...progress });
 	};
@@ -102,7 +100,11 @@ export async function runMaintenancePipeline(options: {
 	log.info("Graph loaded", { ...graphStats });
 
 	// Step 2: Pre-scan (fast, no Claude)
-	emitProgress({ phase: "pre-scan", phaseLabel: "Scanning graph...", phaseStartedAt: Date.now() });
+	emitProgress({
+		phase: "pre-scan",
+		phaseLabel: "Scanning graph...",
+		phaseStartedAt: Date.now(),
+	});
 	const preScanFindings = runPreScan(graph);
 	log.info("Pre-scan complete", { findings: preScanFindings.length });
 

@@ -2,9 +2,7 @@ import type { Finding, RawGraph } from "./types.js";
 
 let nextId = 1;
 
-function finding(
-	fields: Omit<Finding, "id" | "source">,
-): Finding {
+function finding(fields: Omit<Finding, "id" | "source">): Finding {
 	return {
 		id: `PRE-${String(nextId++).padStart(3, "0")}`,
 		source: "pre-scan",
