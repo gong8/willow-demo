@@ -1,13 +1,24 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("../enrichment/enricher.js", () => ({
-	runEnrichment: vi.fn(async () => ({
-		preScanFindings: [],
-		crawlerReports: [],
-		resolverActions: 0,
-		graphStats: { nodeCount: 5, linkCount: 2, categoryCount: 2 },
-		durationMs: 100,
-	})),
+	runEnrichment: vi.fn(async (options: { onProgress?: (p: unknown) => void }) => {
+		options.onProgress?.({
+			phase: "done",
+			phaseLabel: "Maintenance complete",
+			crawlersTotal: 0,
+			crawlersComplete: 0,
+			totalFindings: 0,
+			resolverActions: 0,
+			phaseStartedAt: Date.now(),
+		});
+		return {
+			preScanFindings: [],
+			crawlerReports: [],
+			resolverActions: 0,
+			graphStats: { nodeCount: 5, linkCount: 2, categoryCount: 2 },
+			durationMs: 100,
+		};
+	}),
 }));
 
 vi.mock("@willow/core", () => ({

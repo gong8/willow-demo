@@ -30,6 +30,7 @@ function runResolverPass(options: {
 	userPrompt: string;
 	mcpServerPath: string;
 	maxTurns: number;
+	onAction?: () => void;
 }): Promise<ResolverResult> {
 	return new Promise((resolve) => {
 		const invocationDir = createInvocationDir();
@@ -78,6 +79,7 @@ function runResolverPass(options: {
 		const emitter = (event: string) => {
 			if (event === "tool_call_start") {
 				toolCallCount++;
+				options.onAction?.();
 			}
 		};
 
@@ -105,6 +107,7 @@ export async function spawnResolver(options: {
 	preScanFindings: Finding[];
 	crawlerReports: CrawlerReport[];
 	mcpServerPath: string;
+	onAction?: () => void;
 }): Promise<ResolverResult> {
 	const totalFindings =
 		options.preScanFindings.length +
@@ -126,6 +129,7 @@ export async function spawnResolver(options: {
 			),
 			mcpServerPath: options.mcpServerPath,
 			maxTurns: 25,
+			onAction: options.onAction,
 		});
 
 		// Pass 2: Enrichment suggestions
@@ -133,6 +137,7 @@ export async function spawnResolver(options: {
 			userPrompt: buildEnrichPassPrompt(options.crawlerReports),
 			mcpServerPath: options.mcpServerPath,
 			maxTurns: 25,
+			onAction: options.onAction,
 		});
 
 		return {
@@ -150,5 +155,6 @@ export async function spawnResolver(options: {
 		userPrompt,
 		mcpServerPath: options.mcpServerPath,
 		maxTurns: 25,
+		onAction: options.onAction,
 	});
 }

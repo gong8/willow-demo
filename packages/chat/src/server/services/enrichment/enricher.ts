@@ -7,7 +7,12 @@ import type { CrawlerSubtree } from "./crawler.js";
 import { spawnCrawlers } from "./crawler.js";
 import { runPreScan } from "./pre-scan.js";
 import { spawnResolver } from "./resolver.js";
-import type { EnrichmentReport, RawGraph } from "./types.js";
+import type {
+	EnrichmentProgress,
+	EnrichmentReport,
+	ProgressCallback,
+	RawGraph,
+} from "./types.js";
 
 const log = createLogger("enricher");
 
@@ -59,9 +64,27 @@ function buildGraphSummary(
 export async function runEnrichment(options: {
 	mcpServerPath: string;
 	trigger: "manual" | "auto";
+	onProgress?: ProgressCallback;
 }): Promise<EnrichmentReport> {
 	const start = Date.now();
 	log.info("Enrichment started", { trigger: options.trigger });
+
+	const progress: EnrichmentProgress = {
+		phase: "pre-scan",
+		phaseLabel: "Scanning graph...",
+		crawlersTotal: 0,
+		crawlersComplete: 0,
+		totalFindings: 0,
+		resolverActions: 0,
+		phaseStartedAt: Date.now(),
+	};
+
+	const emitProgress = (
+		updates: Partial<EnrichmentProgress>,
+	) => {
+		Object.assign(progress, updates);
+		options.onProgress?.({ ...progress });
+	};
 
 	// Step 1: Load graph
 	let graph: RawGraph;
@@ -82,6 +105,7 @@ export async function runEnrichment(options: {
 	log.info("Graph loaded", graphStats);
 
 	// Step 2: Pre-scan (fast, no Claude)
+	emitProgress({ phase: "pre-scan", phaseLabel: "Scanning graph...", phaseStartedAt: Date.now() });
 	const preScanFindings = runPreScan(graph);
 	log.info("Pre-scan complete", { findings: preScanFindings.length });
 
@@ -112,11 +136,22 @@ export async function runEnrichment(options: {
 
 	// Step 4: Spawn crawlers in parallel
 	log.info("Spawning crawlers", { count: subtrees.length });
+	emitProgress({
+		phase: "crawling",
+		phaseLabel: `Crawling ${subtrees.length} categories...`,
+		crawlersTotal: subtrees.length,
+		crawlersComplete: 0,
+		phaseStartedAt: Date.now(),
+	});
 	const crawlerReports = await spawnCrawlers({
 		subtrees,
 		mcpServerPath: options.mcpServerPath,
 		graphSummary,
 		preScanFindings,
+		onCrawlerComplete: () => {
+			progress.crawlersComplete++;
+			emitProgress({ crawlersComplete: progress.crawlersComplete });
+		},
 	});
 
 	const totalCrawlerFindings = crawlerReports.reduce(
@@ -133,15 +168,33 @@ export async function runEnrichment(options: {
 	let resolverActions = 0;
 
 	if (totalFindings > 0) {
+		emitProgress({
+			phase: "resolving",
+			phaseLabel: `Resolving ${totalFindings} findings...`,
+			totalFindings,
+			resolverActions: 0,
+			phaseStartedAt: Date.now(),
+		});
 		const resolverResult = await spawnResolver({
 			preScanFindings,
 			crawlerReports,
 			mcpServerPath: options.mcpServerPath,
+			onAction: () => {
+				progress.resolverActions++;
+				emitProgress({ resolverActions: progress.resolverActions });
+			},
 		});
 		resolverActions = resolverResult.actionsExecuted;
 	} else {
 		log.info("No findings — skipping resolver");
 	}
+
+	emitProgress({
+		phase: "committing",
+		phaseLabel: "Committing changes...",
+		totalFindings,
+		phaseStartedAt: Date.now(),
+	});
 
 	const report: EnrichmentReport = {
 		preScanFindings,
@@ -156,6 +209,12 @@ export async function runEnrichment(options: {
 		crawlerFindings: totalCrawlerFindings,
 		resolverActions,
 		durationMs: report.durationMs,
+	});
+
+	emitProgress({
+		phase: "done",
+		phaseLabel: "Maintenance complete",
+		phaseStartedAt: Date.now(),
 	});
 
 	return report;

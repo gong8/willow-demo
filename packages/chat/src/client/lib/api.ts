@@ -63,11 +63,22 @@ export interface MaintenanceToolCall {
 	isError?: boolean;
 }
 
+export interface EnrichmentProgress {
+	phase: "pre-scan" | "crawling" | "resolving" | "committing" | "done";
+	phaseLabel: string;
+	crawlersTotal: number;
+	crawlersComplete: number;
+	totalFindings: number;
+	resolverActions: number;
+	phaseStartedAt: number;
+}
+
 export interface MaintenanceJob {
 	id: string;
 	status: "running" | "complete" | "error";
 	trigger: "manual" | "auto";
 	toolCalls: MaintenanceToolCall[];
+	progress: EnrichmentProgress | null;
 	startedAt: string;
 	completedAt?: string;
 }

@@ -158,6 +158,7 @@ export interface SpawnCrawlerOptions {
 
 export function spawnCrawler(
 	options: SpawnCrawlerOptions,
+	onComplete?: () => void,
 ): Promise<CrawlerReport> {
 	return new Promise((resolve) => {
 		const invocationDir = createInvocationDir();
@@ -251,6 +252,7 @@ export function spawnCrawler(
 				findings: report.findings.length,
 				nodesExplored: report.nodesExplored,
 			});
+			onComplete?.();
 			resolve(report);
 		};
 
@@ -273,6 +275,7 @@ export async function spawnCrawlers(options: {
 	mcpServerPath: string;
 	graphSummary: string;
 	preScanFindings: Finding[];
+	onCrawlerComplete?: () => void;
 }): Promise<CrawlerReport[]> {
 	let subtrees = options.subtrees;
 
@@ -299,14 +302,17 @@ export async function spawnCrawlers(options: {
 		options.preScanFindings.filter((f) => f.nodeIds.includes(subtreeId));
 
 	const promises = subtrees.map((subtree, index) =>
-		spawnCrawler({
-			subtreeRootId: subtree.id,
-			subtreeContent: subtree.content,
-			crawlerIndex: index + 1,
-			mcpServerPath: options.mcpServerPath,
-			graphSummary: options.graphSummary,
-			preScanFindings: findingsForSubtree(subtree.id),
-		}),
+		spawnCrawler(
+			{
+				subtreeRootId: subtree.id,
+				subtreeContent: subtree.content,
+				crawlerIndex: index + 1,
+				mcpServerPath: options.mcpServerPath,
+				graphSummary: options.graphSummary,
+				preScanFindings: findingsForSubtree(subtree.id),
+			},
+			options.onCrawlerComplete,
+		),
 	);
 
 	return Promise.all(promises);

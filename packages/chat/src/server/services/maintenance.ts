@@ -5,6 +5,7 @@ import { JsGraphStore } from "@willow/core";
 import { createLogger } from "../logger.js";
 import type { ToolCallData } from "./cli-chat.js";
 import { runEnrichment } from "./enrichment/enricher.js";
+import type { EnrichmentProgress } from "./enrichment/types.js";
 
 const log = createLogger("maintenance");
 
@@ -17,6 +18,7 @@ export interface MaintenanceJob {
 	status: "running" | "complete" | "error";
 	trigger: "manual" | "auto";
 	toolCalls: ToolCallData[];
+	progress: EnrichmentProgress | null;
 	startedAt: Date;
 	completedAt?: Date;
 }
@@ -44,6 +46,7 @@ export function runMaintenance(options: {
 		status: "running",
 		trigger: options.trigger,
 		toolCalls: [],
+		progress: null,
 		startedAt: new Date(),
 	};
 	currentJob = job;
@@ -78,6 +81,9 @@ export function runMaintenance(options: {
 	runEnrichment({
 		mcpServerPath: options.mcpServerPath,
 		trigger: options.trigger,
+		onProgress: (progress) => {
+			job.progress = progress;
+		},
 	})
 		.then((report) => {
 			job.status = "complete";
