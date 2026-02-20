@@ -3,8 +3,8 @@ import { unlinkSync } from "node:fs";
 import { type Server, createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { LineBuffer } from "./line-buffer.js";
 import { createLogger } from "../logger.js";
+import { LineBuffer } from "./line-buffer.js";
 
 const log = createLogger("event-socket");
 

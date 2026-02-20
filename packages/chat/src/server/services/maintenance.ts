@@ -2,8 +2,8 @@ import { randomUUID } from "node:crypto";
 import { homedir } from "node:os";
 import { resolve } from "node:path";
 import { JsGraphStore } from "@willow/core";
-import { getDisallowedTools } from "./agent-tools.js";
 import { createLogger } from "../logger.js";
+import { getDisallowedTools } from "./agent-tools.js";
 
 const log = createLogger("maintenance");
 import type { SSEEmitter, ToolCallData } from "./cli-chat.js";
@@ -281,13 +281,17 @@ export function runMaintenance(options: {
 
 export function notifyConversationComplete(mcpServerPath: string): void {
 	conversationsSinceLastMaintenance++;
-	log.debug("Conversation count incremented", { count: conversationsSinceLastMaintenance });
+	log.debug("Conversation count incremented", {
+		count: conversationsSinceLastMaintenance,
+	});
 
 	if (
 		conversationsSinceLastMaintenance >= MAINTENANCE_THRESHOLD &&
 		currentJob?.status !== "running"
 	) {
-		log.info("Auto-maintenance threshold reached", { count: conversationsSinceLastMaintenance });
+		log.info("Auto-maintenance threshold reached", {
+			count: conversationsSinceLastMaintenance,
+		});
 		// Delay to let the indexer finish first
 		setTimeout(() => {
 			runMaintenance({ trigger: "auto", mcpServerPath });

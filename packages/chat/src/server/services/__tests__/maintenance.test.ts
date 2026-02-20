@@ -1,10 +1,10 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
-import { 
-	getMaintenanceStatus, 
-	runMaintenance, 
-	notifyConversationComplete
-} from "../maintenance.js";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { spawnCli } from "../cli-chat.js";
+import {
+	getMaintenanceStatus,
+	notifyConversationComplete,
+	runMaintenance,
+} from "../maintenance.js";
 
 vi.mock("../cli-chat.js", async (importOriginal) => {
 	const actual = await importOriginal<typeof import("../cli-chat.js")>();
@@ -17,7 +17,7 @@ vi.mock("../cli-chat.js", async (importOriginal) => {
 			on: vi.fn((event, cb) => {
 				if (event === "close") setTimeout(cb, 10);
 			}),
-			kill: vi.fn()
+			kill: vi.fn(),
 		})),
 		writeSystemPrompt: vi.fn(() => "/tmp/prompt.txt"),
 		writeMcpConfig: vi.fn(() => "/tmp/config.json"),
@@ -53,7 +53,7 @@ describe("maintenance service", () => {
 		// Second run while first is active should return null
 		const job2 = runMaintenance({ trigger: "manual", mcpServerPath: "/mcp" });
 		expect(job2).toBeNull();
-		
+
 		expect(spawnCli).toHaveBeenCalledTimes(1);
 	});
 

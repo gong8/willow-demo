@@ -1,6 +1,6 @@
+import { createLogger } from "../logger.js";
 import { getDisallowedTools } from "./agent-tools.js";
 import type { SSEEmitter, ToolCallData } from "./cli-chat.js";
-import { createLogger } from "../logger.js";
 import {
 	cleanupDir,
 	createInvocationDir,
@@ -182,7 +182,10 @@ export function runSearchAgent(
 		const finish = () => {
 			cleanupDir(invocationDir);
 			const contextSummary = extractMemoryContext(textOutput);
-			log.info("Search complete", { contextLength: contextSummary.length, toolCalls: toolCalls.length });
+			log.info("Search complete", {
+				contextLength: contextSummary.length,
+				toolCalls: toolCalls.length,
+			});
 			resolve({ contextSummary, toolCalls });
 		};
 

@@ -3,6 +3,7 @@ import { PrismaClient } from "@prisma/client";
 import { Hono } from "hono";
 import { streamSSE } from "hono/streaming";
 import { z } from "zod";
+import { createLogger } from "../logger.js";
 import { getDisallowedTools } from "../services/agent-tools.js";
 import { createAgenticStream } from "../services/agentic-stream.js";
 import {
@@ -15,7 +16,6 @@ import {
 	startStream,
 	subscribe,
 } from "../services/stream-manager.js";
-import { createLogger } from "../logger.js";
 
 const log = createLogger("chat");
 const db = new PrismaClient();

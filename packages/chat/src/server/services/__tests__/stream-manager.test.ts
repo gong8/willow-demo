@@ -1,9 +1,14 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
-import { startStream, getStream, subscribe } from "../stream-manager.js";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+import { getStream, startStream, subscribe } from "../stream-manager.js";
 
 // Mock ActiveStreams map implicitly through the exported functions
 const mockDb = {
-	message: { create: vi.fn(), findMany: vi.fn(() => Promise.resolve([{ role: "user", content: "dummy" }])) },
+	message: {
+		create: vi.fn(),
+		findMany: vi.fn(() =>
+			Promise.resolve([{ role: "user", content: "dummy" }]),
+		),
+	},
 	conversation: { update: vi.fn() },
 };
 
@@ -45,17 +50,22 @@ describe("stream-manager", () => {
 
 		// Simulate reading real SSE
 		const encoder = new TextEncoder();
-		controller!.enqueue(encoder.encode("event: content\ndata: {\"content\":\"hello\"}\n\n"));
+		controller!.enqueue(
+			encoder.encode('event: content\ndata: {"content":"hello"}\n\n'),
+		);
 		controller!.enqueue(encoder.encode("event: done\ndata: [DONE]\n\n"));
 		controller!.close();
 
 		await stream.done;
-		
+
 		// Wait for microtasks
-		await new Promise(resolve => process.nextTick(resolve));
-		
+		await new Promise((resolve) => process.nextTick(resolve));
+
 		// It should receive content and done
-		expect(cb).toHaveBeenCalledWith("content", JSON.stringify({ content: "hello" }));
+		expect(cb).toHaveBeenCalledWith(
+			"content",
+			JSON.stringify({ content: "hello" }),
+		);
 		expect(cb).toHaveBeenCalledWith("title", expect.any(String)); // called because it's complete
 		expect(cb).toHaveBeenCalledWith("done", "[DONE]");
 
@@ -65,20 +75,38 @@ describe("stream-manager", () => {
 	it("handles tool calls in stream parsing", async () => {
 		let controller: ReadableStreamDefaultController;
 		const mockReadable = new ReadableStream({
-			start(c) { controller = c; }
+			start(c) {
+				controller = c;
+			},
 		});
 		const encoder = new TextEncoder();
 		const stream = startStream("conv-tc", mockReadable, mockDb as any);
 
-		controller!.enqueue(encoder.encode("event: tool_call_start\ndata: {\"toolCallId\":\"t1\",\"toolName\":\"search\"}\n\n"));
-		controller!.enqueue(encoder.encode("event: tool_call_args\ndata: {\"toolCallId\":\"t1\",\"args\":{\"q\":\"test\"}}\n\n"));
-		controller!.enqueue(encoder.encode("event: content\ndata: {\"content\":\"some result text\"}\n\n"));
-		controller!.enqueue(encoder.encode("event: tool_result\ndata: {\"toolCallId\":\"t1\",\"result\":\"found 1\",\"isError\":false}\n\n"));
+		controller!.enqueue(
+			encoder.encode(
+				'event: tool_call_start\ndata: {"toolCallId":"t1","toolName":"search"}\n\n',
+			),
+		);
+		controller!.enqueue(
+			encoder.encode(
+				'event: tool_call_args\ndata: {"toolCallId":"t1","args":{"q":"test"}}\n\n',
+			),
+		);
+		controller!.enqueue(
+			encoder.encode(
+				'event: content\ndata: {"content":"some result text"}\n\n',
+			),
+		);
+		controller!.enqueue(
+			encoder.encode(
+				'event: tool_result\ndata: {"toolCallId":"t1","result":"found 1","isError":false}\n\n',
+			),
+		);
 		controller!.enqueue(encoder.encode("event: done\ndata: [DONE]\n\n"));
 		controller!.close();
 
 		await stream.done;
-		
+
 		expect(stream.toolCallsData).toHaveLength(1);
 		expect(stream.toolCallsData[0].toolCallId).toBe("t1");
 		expect(stream.toolCallsData[0].args).toEqual({ q: "test" });
@@ -94,11 +122,15 @@ describe("stream-manager", () => {
 	it("cleans up stream after completion delay", async () => {
 		let controller: ReadableStreamDefaultController;
 		const mockReadable = new ReadableStream({
-			start(c) { controller = c; }
+			start(c) {
+				controller = c;
+			},
 		});
 		const stream = startStream("conv-cleanup", mockReadable, mockDb as any);
-		
-		controller!.enqueue(new TextEncoder().encode("event: done\ndata: [DONE]\n\n"));
+
+		controller!.enqueue(
+			new TextEncoder().encode("event: done\ndata: [DONE]\n\n"),
+		);
 		controller!.close();
 
 		await stream.done;

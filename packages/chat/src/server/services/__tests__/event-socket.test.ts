@@ -1,6 +1,6 @@
-import { describe, it, expect, vi, afterEach } from "vitest";
-import { createEventSocket } from "../event-socket.js";
 import { connect } from "net";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { createEventSocket } from "../event-socket.js";
 
 describe("event-socket", () => {
 	let sockets: ReturnType<typeof createEventSocket>[] = [];
@@ -29,21 +29,23 @@ describe("event-socket", () => {
 		socket.onEvent((event, data) => received.push({ event, data }));
 
 		// wait a tiny bit for the server to listen
-		await new Promise(resolve => setTimeout(resolve, 50));
+		await new Promise((resolve) => setTimeout(resolve, 50));
 
 		const client = connect(socket.socketPath);
-		
-		await new Promise<void>(resolve => {
+
+		await new Promise<void>((resolve) => {
 			client.on("connect", () => {
 				// write JSON line
-				client.write(JSON.stringify({ event: "test_event", data: "test_data" }) + "\n");
+				client.write(
+					JSON.stringify({ event: "test_event", data: "test_data" }) + "\n",
+				);
 				client.end();
 				resolve();
 			});
 		});
 
 		// wait for parsing
-		await new Promise(resolve => setTimeout(resolve, 50));
+		await new Promise((resolve) => setTimeout(resolve, 50));
 
 		expect(received).toHaveLength(1);
 		expect(received[0].event).toBe("test_event");
@@ -57,10 +59,10 @@ describe("event-socket", () => {
 		const received: { event: string; data: string }[] = [];
 		socket.onEvent((event, data) => received.push({ event, data }));
 
-		await new Promise(resolve => setTimeout(resolve, 50));
+		await new Promise((resolve) => setTimeout(resolve, 50));
 		const client = connect(socket.socketPath);
-		
-		await new Promise<void>(resolve => {
+
+		await new Promise<void>((resolve) => {
 			client.on("connect", () => {
 				client.write("invalid json line\n");
 				client.end();
@@ -68,7 +70,7 @@ describe("event-socket", () => {
 			});
 		});
 
-		await new Promise(resolve => setTimeout(resolve, 50));
+		await new Promise((resolve) => setTimeout(resolve, 50));
 		expect(received).toHaveLength(0);
 	});
 });

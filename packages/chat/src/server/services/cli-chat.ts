@@ -4,9 +4,9 @@ import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import sharp from "sharp";
+import { createLogger } from "../logger.js";
 import { BLOCKED_BUILTIN_TOOLS, getDisallowedTools } from "./agent-tools.js";
 import { LineBuffer } from "./line-buffer.js";
-import { createLogger } from "../logger.js";
 
 const log = createLogger("cli-chat");
 

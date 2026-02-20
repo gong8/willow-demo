@@ -1,8 +1,8 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { createAgenticStream } from "../agentic-stream.js";
 import { runChatAgent } from "../cli-chat.js";
-import { runIndexerAgent } from "../indexer.js";
 import { createEventSocket } from "../event-socket.js";
+import { runIndexerAgent } from "../indexer.js";
 
 vi.mock("../cli-chat.js", () => ({
 	runChatAgent: vi.fn(),
@@ -16,7 +16,7 @@ vi.mock("../event-socket.js", () => ({
 	createEventSocket: vi.fn(() => ({
 		socketPath: "/tmp/sock",
 		onEvent: vi.fn(),
-		cleanup: vi.fn()
+		cleanup: vi.fn(),
 	})),
 }));
 
@@ -42,10 +42,10 @@ describe("agentic-stream", () => {
 
 		const reader = stream.getReader();
 		const decoder = new TextDecoder();
-		
+
 		let result = await reader.read();
 		expect(decoder.decode(result.value)).toContain("event: content");
-		
+
 		// consume the rest
 		while (!result.done) {
 			result = await reader.read();

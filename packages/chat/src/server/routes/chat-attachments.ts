@@ -56,7 +56,11 @@ attachmentRoutes.post("/", async (c) => {
 		select: { id: true, filename: true, contentType: true },
 	});
 
-	log.info("Attachment uploaded", { id, filename: file.name, size: buffer.length });
+	log.info("Attachment uploaded", {
+		id,
+		filename: file.name,
+		size: buffer.length,
+	});
 
 	return c.json(
 		{

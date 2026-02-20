@@ -1,6 +1,12 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { getCliModel, createInvocationDir, writeTempFile, writeSystemPrompt, createStreamParser } from "../cli-chat.js";
-import { mkdirSync, writeFileSync, rmSync } from "node:fs";
+import { mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import {
+	createInvocationDir,
+	createStreamParser,
+	getCliModel,
+	writeSystemPrompt,
+	writeTempFile,
+} from "../cli-chat.js";
 
 vi.mock("node:fs", async (importOriginal) => {
 	const actual = await importOriginal<typeof import("node:fs")>();
@@ -48,11 +54,11 @@ describe("cli-chat utilities", () => {
 		writeSystemPrompt("/tmp/dir", "Custom prompt");
 		expect(writeFileSync).toHaveBeenCalledWith(
 			"/tmp/dir/system-prompt.txt",
-			expect.stringContaining("Custom prompt")
+			expect.stringContaining("Custom prompt"),
 		);
 		expect(writeFileSync).toHaveBeenCalledWith(
 			"/tmp/dir/system-prompt.txt",
-			expect.stringContaining("IMPORTANT CONSTRAINTS:")
+			expect.stringContaining("IMPORTANT CONSTRAINTS:"),
 		);
 	});
 });
@@ -69,22 +75,25 @@ describe("cli-chat stream parser", () => {
 				type: "content_block_start",
 				index: 0,
 				content_block: { type: "text" },
-			}
+			},
 		});
 		parser.process({
 			type: "stream_event",
 			event: {
 				type: "content_block_delta",
 				index: 0,
-				delta: { type: "text_delta", text: "Hello" }
-			}
+				delta: { type: "text_delta", text: "Hello" },
+			},
 		});
 		parser.process({
 			type: "stream_event",
-			event: { type: "content_block_stop", index: 0 }
+			event: { type: "content_block_stop", index: 0 },
 		});
 
-		expect(emit).toHaveBeenCalledWith("content", JSON.stringify({ content: "Hello" }));
+		expect(emit).toHaveBeenCalledWith(
+			"content",
+			JSON.stringify({ content: "Hello" }),
+		);
 
 		// Test tool use
 		parser.process({
@@ -92,31 +101,41 @@ describe("cli-chat stream parser", () => {
 			event: {
 				type: "content_block_start",
 				index: 1,
-				content_block: { type: "tool_use", id: "t1", name: "search" }
-			}
+				content_block: { type: "tool_use", id: "t1", name: "search" },
+			},
 		});
 		parser.process({
 			type: "stream_event",
 			event: {
 				type: "content_block_delta",
 				index: 1,
-				delta: { type: "input_json_delta", partial_json: "{\"q\"" }
-			}
+				delta: { type: "input_json_delta", partial_json: '{"q"' },
+			},
 		});
 		parser.process({
 			type: "stream_event",
 			event: {
 				type: "content_block_delta",
 				index: 1,
-				delta: { type: "input_json_delta", partial_json: ":\"test\"}" }
-			}
+				delta: { type: "input_json_delta", partial_json: ':"test"}' },
+			},
 		});
 		parser.process({
 			type: "stream_event",
-			event: { type: "content_block_stop", index: 1 }
+			event: { type: "content_block_stop", index: 1 },
 		});
 
-		expect(emit).toHaveBeenCalledWith("tool_call_start", JSON.stringify({ toolCallId: "t1", toolName: "search" }));
-		expect(emit).toHaveBeenCalledWith("tool_call_args", JSON.stringify({ toolCallId: "t1", toolName: "search", args: { q: "test" } }));
+		expect(emit).toHaveBeenCalledWith(
+			"tool_call_start",
+			JSON.stringify({ toolCallId: "t1", toolName: "search" }),
+		);
+		expect(emit).toHaveBeenCalledWith(
+			"tool_call_args",
+			JSON.stringify({
+				toolCallId: "t1",
+				toolName: "search",
+				args: { q: "test" },
+			}),
+		);
 	});
 });

@@ -1,6 +1,11 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+import {
+	createInvocationDir,
+	spawnCli,
+	writeMcpConfig,
+	writeSystemPrompt,
+} from "../cli-chat.js";
 import { runIndexerAgent } from "../indexer.js";
-import { spawnCli, writeMcpConfig, writeSystemPrompt, createInvocationDir } from "../cli-chat.js";
 
 vi.mock("../cli-chat.js", async (importOriginal) => {
 	const actual = await importOriginal<typeof import("../cli-chat.js")>();
@@ -13,7 +18,7 @@ vi.mock("../cli-chat.js", async (importOriginal) => {
 			on: vi.fn((event: string, cb: () => void) => {
 				if (event === "close") setTimeout(cb, 5);
 			}),
-			kill: vi.fn()
+			kill: vi.fn(),
 		})),
 		writeMcpConfig: vi.fn(() => "/tmp/mcp-config.json"),
 		writeSystemPrompt: vi.fn(() => "/tmp/system-prompt.txt"),
@@ -43,7 +48,7 @@ describe("indexer agent", () => {
 		});
 
 		expect(spawnCli).toHaveBeenCalledTimes(1);
-		
+
 		const callArgs = vi.mocked(spawnCli).mock.calls[0][0];
 		expect(callArgs).toContain("--model");
 		expect(callArgs).toContain("opus");
@@ -52,13 +57,15 @@ describe("indexer agent", () => {
 
 	it("handles missing user message gracefully", async () => {
 		const emit = vi.fn();
-		await expect(runIndexerAgent({
-			userMessage: "",
-			assistantResponse: "Ok",
-			mcpServerPath: "/path",
-			emitSSE: emit
-		})).resolves.toBeUndefined();
-		
+		await expect(
+			runIndexerAgent({
+				userMessage: "",
+				assistantResponse: "Ok",
+				mcpServerPath: "/path",
+				emitSSE: emit,
+			}),
+		).resolves.toBeUndefined();
+
 		expect(spawnCli).toHaveBeenCalledTimes(1);
 	});
 });

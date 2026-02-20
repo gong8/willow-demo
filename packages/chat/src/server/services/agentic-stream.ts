@@ -1,11 +1,11 @@
 import { homedir } from "node:os";
 import { resolve } from "node:path";
+import { JsGraphStore } from "@willow/core";
+import { createLogger } from "../logger.js";
 import type { SSEEmitter } from "./cli-chat.js";
 import { type CliChatOptions, runChatAgent } from "./cli-chat.js";
 import { createEventSocket } from "./event-socket.js";
 import { runIndexerAgent } from "./indexer.js";
-import { JsGraphStore } from "@willow/core";
-import { createLogger } from "../logger.js";
 
 const log = createLogger("agentic-stream");
 

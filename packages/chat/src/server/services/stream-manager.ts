@@ -1,7 +1,7 @@
 import type { PrismaClient } from "@prisma/client";
+import { createLogger } from "../logger.js";
 import type { ToolCallData } from "./cli-chat.js";
 import { LineBuffer } from "./line-buffer.js";
-import { createLogger } from "../logger.js";
 
 const log = createLogger("stream-manager");
 
