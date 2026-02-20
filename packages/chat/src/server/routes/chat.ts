@@ -15,7 +15,9 @@ import {
 	startStream,
 	subscribe,
 } from "../services/stream-manager.js";
+import { createLogger } from "../logger.js";
 
+const log = createLogger("chat");
 const db = new PrismaClient();
 
 // Resolve the MCP server entry point
@@ -83,6 +85,7 @@ chatRoutes.post("/conversations", async (c) => {
 		data: {},
 		select: { id: true, title: true, createdAt: true, updatedAt: true },
 	});
+	log.info("Conversation created");
 	return c.json(conversation, 201);
 });
 
@@ -110,6 +113,7 @@ chatRoutes.get("/conversations/:id/messages", async (c) => {
 chatRoutes.delete("/conversations/:id", async (c) => {
 	const { id } = c.req.param();
 	await db.conversation.delete({ where: { id } });
+	log.info("Conversation deleted", { id });
 	return c.json({ ok: true });
 });
 
@@ -127,6 +131,7 @@ chatRoutes.get("/conversations/:id/stream-status", async (c) => {
 // Reconnect to active stream
 chatRoutes.post("/conversations/:id/stream-reconnect", async (c) => {
 	const { id } = c.req.param();
+	log.info("Stream reconnect", { id });
 	const existingStream = getStream(id);
 	if (!existingStream) {
 		return c.json({ error: "No active stream" }, 404);
@@ -145,6 +150,8 @@ chatRoutes.post("/stream", async (c) => {
 
 	const { conversationId, message, attachmentIds, expectedPriorCount } =
 		parsed.data;
+
+	log.info("Stream request", { conversationId, messageLength: message.length });
 
 	const conversation = await db.conversation.findUnique({
 		where: { id: conversationId },
@@ -258,11 +265,13 @@ chatRoutes.get("/maintenance/status", (c) => {
 
 // Trigger maintenance manually
 chatRoutes.post("/maintenance/run", (c) => {
+	log.info("Maintenance triggered manually");
 	const job = runMaintenance({
 		trigger: "manual",
 		mcpServerPath: MCP_SERVER_PATH,
 	});
 	if (!job) {
+		log.warn("Maintenance already running");
 		return c.json({ error: "Maintenance already running" }, 409);
 	}
 	return c.json({ jobId: job.id });
@@ -277,7 +286,7 @@ function pipeStreamToSSE(
 			try {
 				await sseStream.writeSSE({ data, event });
 			} catch {
-				// Client disconnected
+				log.debug("SSE client disconnected");
 			}
 		});
 

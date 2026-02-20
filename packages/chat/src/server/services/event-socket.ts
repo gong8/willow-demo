@@ -4,6 +4,9 @@ import { type Server, createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { LineBuffer } from "./line-buffer.js";
+import { createLogger } from "../logger.js";
+
+const log = createLogger("event-socket");
 
 type EventCallback = (event: string, data: string) => void;
 
@@ -25,9 +28,11 @@ export function createEventSocket(): EventSocket {
 		`willow-evt-${randomUUID().slice(0, 12)}.sock`,
 	);
 
+	log.debug("Socket created", { path: socketPath });
 	const callbacks: EventCallback[] = [];
 
 	const server: Server = createServer((conn) => {
+		log.debug("Client connected");
 		const lineBuffer = new LineBuffer();
 		conn.on("data", (chunk: Buffer) => {
 			for (const line of lineBuffer.push(chunk.toString())) {
@@ -42,13 +47,14 @@ export function createEventSocket(): EventSocket {
 						cb(msg.event, msg.data);
 					}
 				} catch {
-					// ignore malformed messages
+					log.debug("Message parse error");
 				}
 			}
 		});
 	});
 
 	server.listen(socketPath);
+	log.debug("Socket listening", { path: socketPath });
 
 	return {
 		socketPath,
@@ -56,11 +62,12 @@ export function createEventSocket(): EventSocket {
 			callbacks.push(cb);
 		},
 		cleanup() {
+			log.debug("Socket cleanup", { path: socketPath });
 			server.close();
 			try {
 				unlinkSync(socketPath);
 			} catch {
-				// best-effort cleanup
+				log.warn("Socket unlink failed");
 			}
 		},
 	};

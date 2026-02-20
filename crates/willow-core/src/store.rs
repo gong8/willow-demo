@@ -8,6 +8,7 @@ use chrono::Utc;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use uuid::Uuid;
+use tracing::{info, debug};
 
 pub struct ContextResult {
     pub node: Node,
@@ -43,6 +44,7 @@ impl GraphStore {
             None
         };
 
+        info!(path = %path.display(), nodes = graph.nodes.len(), vcs = repo.is_some(), "store opened");
         Ok(GraphStore {
             graph,
             path: path.to_path_buf(),
@@ -90,6 +92,13 @@ impl GraphStore {
         let hash = repo.create_commit(&input, &self.pending_changes, &self.graph)?;
         self.pending_changes.clear();
         Ok(hash)
+    }
+
+    /// Commit if the graph on disk differs from the last committed state.
+    /// Used after external processes modify the graph file.
+    pub fn commit_external_changes(&self, input: CommitInput) -> Result<Option<crate::vcs::types::CommitHash>, WillowError> {
+        let repo = self.repo.as_ref().ok_or(WillowError::VcsNotInitialized)?;
+        repo.commit_if_changed(&input, &self.graph)
     }
 
     pub fn discard_changes(&mut self) -> Result<(), WillowError> {
@@ -164,6 +173,7 @@ impl GraphStore {
         metadata: Option<HashMap<String, String>>,
         temporal: Option<TemporalMetadata>,
     ) -> Result<Node, WillowError> {
+        debug!(parent = %parent_id, node_type = %node_type, "create_node");
         let parent_nid = NodeId(parent_id.to_string());
 
         if !self.graph.nodes.contains_key(&parent_nid) {
@@ -296,6 +306,7 @@ impl GraphStore {
         temporal: Option<TemporalMetadata>,
         reason: Option<&str>,
     ) -> Result<Node, WillowError> {
+        debug!(node_id = %node_id, "update_node");
         let nid = NodeId(node_id.to_string());
 
         // Capture old values before mutation for change tracking
@@ -374,6 +385,7 @@ impl GraphStore {
         let mut to_delete = Vec::new();
         self.collect_all_descendants(&nid, &mut to_delete);
         to_delete.push(nid.clone());
+        debug!(node_id = %node_id, cascade = to_delete.len(), "delete_node");
 
         // Capture deleted nodes and links for change tracking
         let deleted_nodes: Vec<Node> = to_delete
@@ -434,6 +446,7 @@ impl GraphStore {
         to_node: &str,
         relation: &str,
     ) -> Result<Link, WillowError> {
+        debug!(from = %from_node, to = %to_node, relation = %relation, "add_link");
         let from_nid = NodeId(from_node.to_string());
         let to_nid = NodeId(to_node.to_string());
 

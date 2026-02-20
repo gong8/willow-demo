@@ -1,6 +1,7 @@
 use std::collections::VecDeque;
 
 use crate::model::{Graph, Node, NodeId};
+use tracing::debug;
 
 #[derive(Debug, Clone)]
 pub struct SearchResult {
@@ -43,6 +44,7 @@ pub fn search_nodes(graph: &Graph, query: &str, max_results: usize) -> Vec<Searc
 
     results.sort_by(|a, b| b.score.partial_cmp(&a.score).unwrap_or(std::cmp::Ordering::Equal));
     results.truncate(max_results);
+    debug!(query = %query, results = results.len(), "search complete");
     results
 }
 

@@ -4,6 +4,7 @@ use crate::vcs::types::{CommitData, CommitHash, Delta, HeadState, RepoConfig};
 use sha2::{Digest, Sha256};
 use std::io::Read;
 use std::path::{Path, PathBuf};
+use tracing::debug;
 
 /// Manages on-disk storage of VCS objects (commits, snapshots, deltas, refs).
 pub struct ObjectStore {
@@ -142,6 +143,7 @@ impl ObjectStore {
     }
 
     pub fn write_commit(&self, hash: &CommitHash, data: &CommitData) -> Result<(), WillowError> {
+        debug!(hash = %hash.0, "writing commit");
         let path = self.commits_dir().join(&hash.0);
         let json = serde_json::to_string_pretty(data)?;
         std::fs::write(path, json)?;
@@ -149,6 +151,7 @@ impl ObjectStore {
     }
 
     pub fn read_commit(&self, hash: &CommitHash) -> Result<CommitData, WillowError> {
+        debug!(hash = %hash.0, "reading commit");
         let path = self.commits_dir().join(&hash.0);
         if !path.exists() {
             return Err(WillowError::VcsCommitNotFound(hash.0.clone()));
@@ -161,6 +164,7 @@ impl ObjectStore {
     // ---- Snapshots (zstd compressed) ----
 
     pub fn write_snapshot(&self, hash: &CommitHash, graph: &Graph) -> Result<(), WillowError> {
+        debug!(hash = %hash.0, "writing snapshot");
         let path = self.snapshots_dir().join(&hash.0);
         let json = serde_json::to_vec(graph)?;
         let compressed = zstd::encode_all(json.as_slice(), 3).map_err(WillowError::Io)?;
@@ -169,6 +173,7 @@ impl ObjectStore {
     }
 
     pub fn read_snapshot(&self, hash: &CommitHash) -> Result<Graph, WillowError> {
+        debug!(hash = %hash.0, "reading snapshot");
         let path = self.snapshots_dir().join(&hash.0);
         if !path.exists() {
             return Err(WillowError::VcsCommitNotFound(hash.0.clone()));
@@ -184,6 +189,7 @@ impl ObjectStore {
     // ---- Deltas ----
 
     pub fn write_delta(&self, hash: &CommitHash, delta: &Delta) -> Result<(), WillowError> {
+        debug!(hash = %hash.0, "writing delta");
         let path = self.deltas_dir().join(&hash.0);
         let json = serde_json::to_string_pretty(delta)?;
         std::fs::write(path, json)?;
@@ -191,6 +197,7 @@ impl ObjectStore {
     }
 
     pub fn read_delta(&self, hash: &CommitHash) -> Result<Delta, WillowError> {
+        debug!(hash = %hash.0, "reading delta");
         let path = self.deltas_dir().join(&hash.0);
         if !path.exists() {
             return Err(WillowError::VcsCommitNotFound(hash.0.clone()));

@@ -5,6 +5,9 @@ import { type CliChatOptions, runChatAgent } from "./cli-chat.js";
 import { createEventSocket } from "./event-socket.js";
 import { runIndexerAgent } from "./indexer.js";
 import { JsGraphStore } from "@willow/core";
+import { createLogger } from "../logger.js";
+
+const log = createLogger("agentic-stream");
 
 interface AgenticStreamOptions {
 	/** Options for the chat CLI stream (coordinator config will be injected). */
@@ -67,6 +70,7 @@ export function createAgenticStream(
 			});
 
 			try {
+				log.info("Stream started", { conversationId });
 				// 2. Run chat agent with coordinator MCP enabled
 				let assistantText = "";
 
@@ -79,7 +83,7 @@ export function createAgenticStream(
 								assistantText += parsed.content as string;
 							}
 						} catch {
-							// ignore parse errors
+							log.debug("Content parse error");
 						}
 					}
 					// Forward all events except "done" — we control the lifecycle
@@ -98,9 +102,11 @@ export function createAgenticStream(
 					},
 					chatEmitter,
 				);
+				log.info("Chat phase complete");
 
 				// 3. Indexer phase — update memory with conversation facts
 				if (assistantText) {
+					log.info("Indexer phase started");
 					emit("indexer_phase", JSON.stringify({ status: "start" }));
 
 					await runIndexerAgent({
@@ -110,6 +116,7 @@ export function createAgenticStream(
 						emitSSE: emit,
 						signal: chatOptions.signal,
 					});
+					log.info("Indexer phase complete");
 
 					emit("indexer_phase", JSON.stringify({ status: "end" }));
 
@@ -125,31 +132,35 @@ export function createAgenticStream(
 							try {
 								store.vcsInit();
 							} catch {
-								/* already initialized */
+								log.debug("VCS init check");
 							}
 						}
-						if (store.hasPendingChanges()) {
-							store.commit({
-								message: "Conversation indexed",
-								source: "conversation",
-								conversationId: conversationId ?? undefined,
-								summary: userMessage.slice(0, 100),
-								jobId: undefined,
-								toolName: undefined,
-							});
-						}
+						// Use commitExternalChanges to diff on-disk graph against
+						// last committed state — hasPendingChanges() won't work here
+						// because the indexer ran in a separate process.
+						store.commitExternalChanges({
+							message: "Conversation indexed",
+							source: "conversation",
+							conversationId: conversationId ?? undefined,
+							summary: userMessage.slice(0, 100),
+							jobId: undefined,
+							toolName: undefined,
+						});
+						log.info("VCS committed", { conversationId });
 					} catch {
-						// VCS commit failure should not break the stream
+						log.warn("VCS commit failed");
 					}
 				}
 
 				emit("done", "[DONE]");
 			} catch {
+				log.error("Agentic stream failed");
 				if (!closed) {
 					emit("error", JSON.stringify({ error: "Agentic stream failed" }));
 					emit("done", "[DONE]");
 				}
 			} finally {
+				log.debug("Socket cleanup");
 				socket.cleanup();
 				close();
 			}

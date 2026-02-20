@@ -1,5 +1,6 @@
 import { getDisallowedTools } from "./agent-tools.js";
 import type { SSEEmitter, ToolCallData } from "./cli-chat.js";
+import { createLogger } from "../logger.js";
 import {
 	cleanupDir,
 	createInvocationDir,
@@ -9,6 +10,8 @@ import {
 	writeMcpConfig,
 	writeSystemPrompt,
 } from "./cli-chat.js";
+
+const log = createLogger("indexer");
 
 const INDEXER_SYSTEM_PROMPT = `You are a background knowledge-graph indexer. Your ONLY job is to analyze a conversation and update the user's knowledge graph with any new facts.
 
@@ -49,6 +52,7 @@ export function runIndexerAgent(
 		options;
 
 	return new Promise((resolve) => {
+		log.info("Indexer started");
 		const toolCalls: ToolCallData[] = [];
 
 		const invocationDir = createInvocationDir();
@@ -88,6 +92,7 @@ export function runIndexerAgent(
 		try {
 			proc = spawnCli(args, invocationDir);
 		} catch {
+			log.error("CLI spawn failed");
 			cleanupDir(invocationDir);
 			resolve();
 			return;
@@ -142,7 +147,7 @@ export function runIndexerAgent(
 				}
 				// Content from indexer is silently discarded (no text output needed)
 			} catch {
-				// ignore parse errors
+				log.debug("Emitter parse error");
 			}
 		};
 
@@ -157,12 +162,14 @@ export function runIndexerAgent(
 
 		pipeStdout(proc, parser);
 
-		proc.stderr?.on("data", () => {
-			// silently discard
+		proc.stderr?.on("data", (chunk: Buffer) => {
+			const text = chunk.toString().trim();
+			if (text) log.debug("stderr", { text: text.slice(0, 1000) });
 		});
 
 		const finish = () => {
 			cleanupDir(invocationDir);
+			log.info("Indexer complete");
 			resolve();
 		};
 

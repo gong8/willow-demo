@@ -1,8 +1,11 @@
 import { existsSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
-import { resolve, dirname } from "node:path";
-import { Hono } from "hono";
+import { dirname, resolve } from "node:path";
 import { JsGraphStore } from "@willow/core";
+import { Hono } from "hono";
+import { createLogger } from "../logger.js";
+
+const log = createLogger("graph");
 
 const GRAPH_PATH =
 	process.env.WILLOW_GRAPH_PATH ?? resolve(homedir(), ".willow", "graph.json");
@@ -16,11 +19,13 @@ let _store: InstanceType<typeof JsGraphStore> | null = null;
 function getStore(): InstanceType<typeof JsGraphStore> {
 	if (!_store) {
 		_store = JsGraphStore.open(GRAPH_PATH);
+		log.info("Graph store initialized");
 		// Auto-init VCS if not already initialized
 		try {
 			_store.currentBranch();
 		} catch {
 			try {
+				log.debug("VCS auto-init");
 				_store.vcsInit();
 			} catch {
 				// Already initialized or not supported
@@ -41,6 +46,7 @@ graphRoutes.get("/", (c) => {
 		const graph = JSON.parse(raw);
 		return c.json(graph);
 	} catch {
+		log.warn("Graph file read failed");
 		return c.json(EMPTY_GRAPH);
 	}
 });
@@ -53,6 +59,7 @@ graphRoutes.get("/log", (c) => {
 		const entries = store.log(limit);
 		return c.json(entries);
 	} catch (e: unknown) {
+		log.error("Failed to get log", { error: (e as Error).message });
 		return c.json({ error: (e as Error).message }, 400);
 	}
 });
@@ -65,6 +72,7 @@ graphRoutes.get("/commits/:hash", (c) => {
 		const detail = store.showCommit(hash);
 		return c.json(detail);
 	} catch (e: unknown) {
+		log.error("Failed to get commit", { error: (e as Error).message });
 		return c.json({ error: (e as Error).message }, 404);
 	}
 });
@@ -76,6 +84,7 @@ graphRoutes.get("/branches", (c) => {
 		const branches = store.listBranches();
 		return c.json(branches);
 	} catch (e: unknown) {
+		log.error("Failed to list branches", { error: (e as Error).message });
 		return c.json({ error: (e as Error).message }, 400);
 	}
 });
@@ -88,6 +97,7 @@ graphRoutes.post("/branches", async (c) => {
 		store.createBranch(body.name);
 		return c.json({ ok: true, name: body.name });
 	} catch (e: unknown) {
+		log.error("Failed to create branch", { error: (e as Error).message });
 		return c.json({ error: (e as Error).message }, 400);
 	}
 });
@@ -100,6 +110,7 @@ graphRoutes.post("/branches/:name/switch", (c) => {
 		store.switchBranch(name);
 		return c.json({ ok: true, branch: name });
 	} catch (e: unknown) {
+		log.error("Failed to switch branch", { error: (e as Error).message });
 		return c.json({ error: (e as Error).message }, 400);
 	}
 });
@@ -112,6 +123,7 @@ graphRoutes.delete("/branches/:name", (c) => {
 		store.deleteBranch(name);
 		return c.json({ ok: true });
 	} catch (e: unknown) {
+		log.error("Failed to delete branch", { error: (e as Error).message });
 		return c.json({ error: (e as Error).message }, 400);
 	}
 });
@@ -124,6 +136,40 @@ graphRoutes.post("/merge", async (c) => {
 		const hash = store.mergeBranch(body.source);
 		return c.json({ ok: true, hash });
 	} catch (e: unknown) {
+		log.error("Failed to merge", { error: (e as Error).message });
+		return c.json({ error: (e as Error).message }, 400);
+	}
+});
+
+// POST /restore — restore graph to a previous commit
+graphRoutes.post("/restore", async (c) => {
+	try {
+		const store = getStore();
+		const body = await c.req.json<{ hash: string }>();
+		const newHash = store.restoreToCommit(body.hash);
+		return c.json({ ok: true, hash: newHash });
+	} catch (e: unknown) {
+		log.error("Failed to restore", { error: (e as Error).message });
+		return c.json({ error: (e as Error).message }, 400);
+	}
+});
+
+// GET /diff — diff between two commits
+graphRoutes.get("/diff", (c) => {
+	try {
+		const store = getStore();
+		const from = c.req.query("from");
+		const to = c.req.query("to");
+		if (!from || !to) {
+			return c.json(
+				{ error: "Both 'from' and 'to' query params required" },
+				400,
+			);
+		}
+		const changes = store.diff(from, to);
+		return c.json(changes);
+	} catch (e: unknown) {
+		log.error("Failed to diff", { error: (e as Error).message });
 		return c.json({ error: (e as Error).message }, 400);
 	}
 });
@@ -141,6 +187,7 @@ graphRoutes.get("/at/:hash", (c) => {
 		const detail = store.showCommit(hash);
 		return c.json(detail);
 	} catch (e: unknown) {
+		log.error("Failed to get commit state", { error: (e as Error).message });
 		return c.json({ error: (e as Error).message }, 404);
 	}
 });

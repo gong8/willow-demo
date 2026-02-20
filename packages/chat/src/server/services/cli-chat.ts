@@ -6,6 +6,9 @@ import { join } from "node:path";
 import sharp from "sharp";
 import { BLOCKED_BUILTIN_TOOLS, getDisallowedTools } from "./agent-tools.js";
 import { LineBuffer } from "./line-buffer.js";
+import { createLogger } from "../logger.js";
+
+const log = createLogger("cli-chat");
 
 export { BLOCKED_BUILTIN_TOOLS };
 
@@ -43,6 +46,7 @@ async function resizeImagesForCli(
 				.toFile(outPath);
 			resized.push(outPath);
 		} catch {
+			log.warn("Image resize failed", { index: i });
 			resized.push(images[i]);
 		}
 	}
@@ -619,7 +623,7 @@ export function createStreamParser(emitSSE: SSEEmitter) {
 		try {
 			args = tc.argsJson ? JSON.parse(tc.argsJson) : {};
 		} catch {
-			// Failed to parse tool call args
+			log.debug("Tool call args parse failed");
 		}
 		emitSSE(
 			"tool_call_args",
@@ -698,7 +702,7 @@ export function cleanupDir(dir: string): void {
 	try {
 		rmSync(dir, { recursive: true, force: true });
 	} catch {
-		// best-effort cleanup
+		log.debug("Cleanup dir failed");
 	}
 }
 
@@ -727,16 +731,19 @@ function wireProcessLifecycle(
 
 	pipeStdout(proc, parser);
 
-	proc.stderr?.on("data", (_chunk: Buffer) => {
-		// Log stderr silently
+	proc.stderr?.on("data", (chunk: Buffer) => {
+		const text = chunk.toString().trim();
+		if (text) log.debug("stderr", { text: text.slice(0, 1000) });
 	});
 
 	proc.on("close", () => {
+		log.info("Process closed");
 		finalize();
 		cleanupDir(invocationDir);
 	});
 
 	proc.on("error", (err) => {
+		log.error("Process error");
 		finalize(err.message);
 		cleanupDir(invocationDir);
 	});
@@ -788,6 +795,7 @@ async function prepareInvocation(options: CliChatOptions): Promise<{
 		prompt,
 	);
 
+	log.info("Invocation prepared", { model: options.model ?? "default" });
 	return { invocationDir, args };
 }
 
@@ -817,6 +825,7 @@ export function streamCliChat(
 			try {
 				proc = spawnCli(args, invocationDir);
 			} catch (err) {
+				log.error("CLI spawn failed");
 				const msg = err instanceof Error ? err.message : "Unknown spawn error";
 				emit("error", JSON.stringify({ error: msg }));
 				emit("done", "[DONE]");
@@ -847,6 +856,7 @@ export async function runChatAgent(
 		try {
 			proc = spawnCli(args, invocationDir);
 		} catch (err) {
+			log.error("CLI spawn failed");
 			const msg = err instanceof Error ? err.message : "Unknown spawn error";
 			emitSSE("error", JSON.stringify({ error: msg }));
 			cleanupDir(invocationDir);
@@ -865,8 +875,9 @@ export async function runChatAgent(
 
 		pipeStdout(proc, parser);
 
-		proc.stderr?.on("data", () => {
-			// silently discard
+		proc.stderr?.on("data", (chunk: Buffer) => {
+			const text = chunk.toString().trim();
+			if (text) log.debug("stderr", { text: text.slice(0, 1000) });
 		});
 
 		const finish = () => {

@@ -8,6 +8,7 @@ import {
 } from "./components/ConversationSidebar.js";
 import { ChatThread } from "./components/chat/ChatThread.js";
 import { GraphView } from "./components/graph/GraphView.js";
+import { HistoryView } from "./components/history/HistoryView.js";
 import { createConversation } from "./lib/api.js";
 
 const queryClient = new QueryClient();
@@ -56,15 +57,27 @@ function ChatApp() {
 				onViewChange={setActiveView}
 			/>
 			<div className="flex min-h-0 flex-1 flex-col">
-				{activeView === "graph" ? (
+				{activeView === "history" && <HistoryView />}
+				{activeView === "graph" && (
 					<GraphView activeConversationId={activeConversationId} />
-				) : activeConversationId ? (
-					<ChatThread
-						key={activeConversationId}
-						conversationId={activeConversationId}
-					/>
+				)}
+				{activeConversationId ? (
+					<div
+						className={
+							activeView === "chat"
+								? "flex min-h-0 flex-1 flex-col"
+								: "hidden"
+						}
+					>
+						<ChatThread
+							key={activeConversationId}
+							conversationId={activeConversationId}
+						/>
+					</div>
 				) : (
-					<EmptyState onCreated={(id) => setActiveConversationId(id)} />
+					activeView === "chat" && (
+						<EmptyState onCreated={(id) => setActiveConversationId(id)} />
+					)
 				)}
 			</div>
 		</div>

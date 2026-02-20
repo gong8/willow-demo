@@ -1,4 +1,5 @@
 use crate::model::{Graph, NodeId};
+use tracing::debug;
 
 #[derive(Debug, Clone)]
 pub struct NodeChangeSummary {
@@ -111,6 +112,7 @@ pub fn compute_graph_diff(old: &Graph, new: &Graph) -> ChangeSummary {
         }
     }
 
+    debug!(created = summary.nodes_created.len(), updated = summary.nodes_updated.len(), deleted = summary.nodes_deleted.len(), "graph diff computed");
     summary
 }
 

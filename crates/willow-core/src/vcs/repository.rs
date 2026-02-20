@@ -9,6 +9,7 @@ use crate::vcs::object_store::ObjectStore;
 use crate::vcs::types::*;
 use chrono::Utc;
 use std::path::{Path, PathBuf};
+use tracing::{info, debug};
 
 /// High-level VCS repository managing commits, branches, and history.
 pub struct Repository {
@@ -57,6 +58,7 @@ impl Repository {
         store.write_branch_ref(&config.default_branch, &hash)?;
         store.write_head(&HeadState::Branch(config.default_branch.clone()))?;
 
+        info!("VCS repository initialized");
         Ok(Repository {
             store,
             config,
@@ -123,6 +125,7 @@ impl Repository {
         };
 
         let hash = ObjectStore::hash_commit(&commit_data);
+        info!(message = %input.message, storage_type = ?storage_type, "commit created");
         self.store.write_commit(&hash, &commit_data)?;
 
         if is_snapshot {
@@ -159,6 +162,7 @@ impl Repository {
             if data.storage_type == CommitStorageType::Snapshot {
                 // Found snapshot, reconstruct from here
                 let mut graph = self.store.read_snapshot(&current)?;
+                debug!(target = %target_hash.0, chain_len = chain.len(), "reconstructing graph");
                 // Replay deltas forward
                 for hash in chain.iter().rev() {
                     let delta = self.store.read_delta(hash)?;
@@ -235,6 +239,56 @@ impl Repository {
         Ok(compute_graph_diff(&from_graph, &to_graph))
     }
 
+    /// Create a snapshot commit if the current graph differs from HEAD.
+    /// Used when changes were made externally (e.g. by a subprocess) and
+    /// in-memory pending_changes are not available.
+    pub fn commit_if_changed(
+        &self,
+        input: &CommitInput,
+        current_graph: &Graph,
+    ) -> Result<Option<CommitHash>, WillowError> {
+        let head_hash = self
+            .store
+            .resolve_head()?
+            .ok_or(WillowError::VcsNotInitialized)?;
+
+        let committed_graph = self.reconstruct_at(&head_hash)?;
+        let diff = compute_graph_diff(&committed_graph, current_graph);
+
+        if diff.nodes_created.is_empty()
+            && diff.nodes_updated.is_empty()
+            && diff.nodes_deleted.is_empty()
+            && diff.links_created.is_empty()
+            && diff.links_removed.is_empty()
+        {
+            return Ok(None);
+        }
+
+        // Force a snapshot commit so we don't need detailed Change objects
+        let commit_data = CommitData {
+            parents: vec![head_hash],
+            message: input.message.clone(),
+            timestamp: Utc::now(),
+            source: input.source.clone(),
+            storage_type: CommitStorageType::Snapshot,
+            depth_since_snapshot: 0,
+        };
+
+        let hash = ObjectStore::hash_commit(&commit_data);
+        self.store.write_commit(&hash, &commit_data)?;
+        self.store.write_snapshot(&hash, current_graph)?;
+
+        let head_state = self.store.read_head()?;
+        match head_state {
+            HeadState::Branch(name) => self.store.write_branch_ref(&name, &hash)?,
+            HeadState::Detached(_) => {
+                self.store.write_head(&HeadState::Detached(hash.clone()))?
+            }
+        }
+
+        Ok(Some(hash))
+    }
+
     // ---- Branch operations ----
 
     /// Get current branch name (None if detached).
@@ -285,6 +339,7 @@ impl Repository {
         name: &str,
         has_pending_changes: bool,
     ) -> Result<Graph, WillowError> {
+        info!(branch = %name, "switching branch");
         if has_pending_changes {
             return Err(WillowError::HasPendingChanges);
         }
@@ -391,6 +446,7 @@ impl Repository {
         source_branch: &str,
         current_graph: &Graph,
     ) -> Result<MergeBranchResult, WillowError> {
+        info!(source = %source_branch, "merging branch");
         let current_branch_name = self
             .current_branch()?
             .ok_or(WillowError::VcsNotInitialized)?;

@@ -89,3 +89,85 @@ export async function triggerMaintenance(): Promise<{ jobId: string }> {
 	});
 	return res.json();
 }
+
+// --- VCS types ---
+
+export interface CommitEntry {
+	hash: string;
+	message: string;
+	timestamp: string;
+	source: string;
+	sourceDetail?: string;
+	parents: string[];
+	storageType: string;
+}
+
+export interface NodeChangeSummary {
+	nodeId: string;
+	nodeType: string;
+	content: string;
+	oldContent?: string;
+	path: string[];
+}
+
+export interface LinkChangeSummary {
+	linkId: string;
+	fromNode: string;
+	toNode: string;
+	relation: string;
+}
+
+export interface ChangeSummary {
+	nodesCreated: NodeChangeSummary[];
+	nodesUpdated: NodeChangeSummary[];
+	nodesDeleted: NodeChangeSummary[];
+	linksCreated: LinkChangeSummary[];
+	linksRemoved: LinkChangeSummary[];
+}
+
+export interface CommitDetail {
+	commit: CommitEntry;
+	diff: ChangeSummary;
+}
+
+export interface BranchInfo {
+	name: string;
+	head: string;
+	isCurrent: boolean;
+}
+
+// --- VCS API functions ---
+
+export async function fetchCommitLog(limit = 50): Promise<CommitEntry[]> {
+	const res = await fetch(`${BASE_URL}/graph/log?limit=${limit}`);
+	return res.json();
+}
+
+export async function fetchCommitDetail(hash: string): Promise<CommitDetail> {
+	const res = await fetch(`${BASE_URL}/graph/commits/${hash}`);
+	return res.json();
+}
+
+export async function fetchBranches(): Promise<BranchInfo[]> {
+	const res = await fetch(`${BASE_URL}/graph/branches`);
+	return res.json();
+}
+
+export async function restoreToCommit(
+	hash: string,
+): Promise<{ ok: boolean; hash: string }> {
+	const res = await fetch(`${BASE_URL}/graph/restore`, {
+		method: "POST",
+		headers: { "Content-Type": "application/json" },
+		body: JSON.stringify({ hash }),
+	});
+	return res.json();
+}
+
+export async function diffCommits(
+	from: string,
+	to: string,
+): Promise<ChangeSummary> {
+	const res = await fetch(`${BASE_URL}/graph/diff?from=${from}&to=${to}`);
+	return res.json();
+}

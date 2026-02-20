@@ -3,6 +3,9 @@ import { homedir } from "node:os";
 import { resolve } from "node:path";
 import { JsGraphStore } from "@willow/core";
 import { getDisallowedTools } from "./agent-tools.js";
+import { createLogger } from "../logger.js";
+
+const log = createLogger("maintenance");
 import type { SSEEmitter, ToolCallData } from "./cli-chat.js";
 import {
 	cleanupDir,
@@ -74,6 +77,7 @@ export function runMaintenance(options: {
 		startedAt: new Date(),
 	};
 	currentJob = job;
+	log.info("Job started", { id: job.id, trigger: options.trigger });
 
 	const invocationDir = createInvocationDir();
 	const mcpConfigPath = writeMcpConfig(invocationDir, options.mcpServerPath);
@@ -109,10 +113,48 @@ export function runMaintenance(options: {
 		prompt,
 	];
 
+	// Create a maintenance branch so changes are isolated (like Dependabot)
+	const branchName = `maintenance/${job.id.slice(0, 8)}`;
+	let originalBranch: string | null = null;
+	try {
+		const graphPath =
+			process.env.WILLOW_GRAPH_PATH ??
+			resolve(homedir(), ".willow", "graph.json");
+		const store = JsGraphStore.open(graphPath);
+		try {
+			store.currentBranch();
+		} catch {
+			try {
+				store.vcsInit();
+			} catch {
+				/* already initialized */
+			}
+		}
+		originalBranch = store.currentBranch();
+		store.createBranch(branchName);
+		store.switchBranch(branchName);
+	} catch {
+		// If branching fails, fall through — finish() will still commit on whatever branch
+	}
+
 	let proc: ReturnType<typeof spawnCli>;
 	try {
 		proc = spawnCli(args, invocationDir);
 	} catch {
+		log.error("CLI spawn failed", { jobId: job.id });
+		// Restore original branch on spawn failure
+		if (originalBranch) {
+			try {
+				const graphPath =
+					process.env.WILLOW_GRAPH_PATH ??
+					resolve(homedir(), ".willow", "graph.json");
+				const store = JsGraphStore.open(graphPath);
+				store.switchBranch(originalBranch);
+				store.deleteBranch(branchName);
+			} catch {
+				/* best effort */
+			}
+		}
 		cleanupDir(invocationDir);
 		job.status = "error";
 		job.completedAt = new Date();
@@ -145,7 +187,7 @@ export function runMaintenance(options: {
 			}
 			// Content from maintenance agent is silently discarded
 		} catch {
-			// ignore parse errors
+			log.debug("Emitter parse error");
 		}
 	};
 
@@ -154,8 +196,9 @@ export function runMaintenance(options: {
 
 	pipeStdout(proc, parser);
 
-	proc.stderr?.on("data", () => {
-		// silently discard
+	proc.stderr?.on("data", (chunk: Buffer) => {
+		const text = chunk.toString().trim();
+		if (text) log.debug("stderr", { text: text.slice(0, 1000) });
 	});
 
 	const finish = () => {
@@ -164,23 +207,16 @@ export function runMaintenance(options: {
 			job.status = "complete";
 		}
 		job.completedAt = new Date();
+		log.info("Job complete", { id: job.id, toolCalls: job.toolCalls.length });
 		conversationsSinceLastMaintenance = 0;
 
-		// Auto-commit maintenance changes with job attribution
+		// Commit on maintenance branch, switch back, merge (like Dependabot)
 		try {
 			const graphPath =
 				process.env.WILLOW_GRAPH_PATH ??
 				resolve(homedir(), ".willow", "graph.json");
 			const store = JsGraphStore.open(graphPath);
-			try {
-				store.currentBranch();
-			} catch {
-				try {
-					store.vcsInit();
-				} catch {
-					/* already initialized */
-				}
-			}
+
 			if (store.hasPendingChanges()) {
 				store.commit({
 					message: `Maintenance: ${job.trigger} run`,
@@ -191,8 +227,23 @@ export function runMaintenance(options: {
 					toolName: undefined,
 				});
 			}
+
+			// Merge maintenance branch back and clean up
+			if (originalBranch && store.currentBranch() === branchName) {
+				store.switchBranch(originalBranch);
+				try {
+					store.mergeBranch(branchName);
+				} catch {
+					// Merge conflict — changes stay on the maintenance branch
+				}
+				try {
+					store.deleteBranch(branchName);
+				} catch {
+					/* best effort cleanup */
+				}
+			}
 		} catch {
-			// VCS commit failure should not break maintenance
+			log.warn("VCS commit failed after maintenance");
 		}
 	};
 
@@ -202,6 +253,24 @@ export function runMaintenance(options: {
 			job.status = "error";
 		}
 		job.completedAt = new Date();
+		log.error("Job failed", { id: job.id });
+
+		// Discard maintenance branch on error
+		if (originalBranch) {
+			try {
+				const graphPath =
+					process.env.WILLOW_GRAPH_PATH ??
+					resolve(homedir(), ".willow", "graph.json");
+				const store = JsGraphStore.open(graphPath);
+				if (store.currentBranch() === branchName) {
+					store.discardChanges();
+					store.switchBranch(originalBranch);
+				}
+				store.deleteBranch(branchName);
+			} catch {
+				/* best effort */
+			}
+		}
 	};
 
 	proc.on("close", finish);
@@ -212,11 +281,13 @@ export function runMaintenance(options: {
 
 export function notifyConversationComplete(mcpServerPath: string): void {
 	conversationsSinceLastMaintenance++;
+	log.debug("Conversation count incremented", { count: conversationsSinceLastMaintenance });
 
 	if (
 		conversationsSinceLastMaintenance >= MAINTENANCE_THRESHOLD &&
 		currentJob?.status !== "running"
 	) {
+		log.info("Auto-maintenance threshold reached", { count: conversationsSinceLastMaintenance });
 		// Delay to let the indexer finish first
 		setTimeout(() => {
 			runMaintenance({ trigger: "auto", mcpServerPath });

@@ -1,5 +1,5 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { MessageSquare, Network, Plus, Trash2 } from "lucide-react";
+import { History, MessageSquare, Network, Plus, Trash2 } from "lucide-react";
 import {
 	type Conversation,
 	createConversation,
@@ -7,7 +7,7 @@ import {
 	fetchConversations,
 } from "../lib/api.js";
 
-export type ActiveView = "chat" | "graph";
+export type ActiveView = "chat" | "graph" | "history";
 
 export function ConversationSidebar({
 	activeId,
@@ -83,6 +83,18 @@ export function ConversationSidebar({
 						title="Knowledge graph"
 					>
 						<Network className="h-4 w-4" />
+					</button>
+					<button
+						type="button"
+						onClick={() => onViewChange("history")}
+						className={`rounded-md p-1.5 transition-colors ${
+							activeView === "history"
+								? "bg-accent text-accent-foreground"
+								: "text-muted-foreground hover:bg-accent hover:text-foreground"
+						}`}
+						title="Version history"
+					>
+						<History className="h-4 w-4" />
 					</button>
 					<button
 						type="button"

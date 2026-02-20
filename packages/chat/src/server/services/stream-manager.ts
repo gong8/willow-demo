@@ -1,6 +1,9 @@
 import type { PrismaClient } from "@prisma/client";
 import type { ToolCallData } from "./cli-chat.js";
 import { LineBuffer } from "./line-buffer.js";
+import { createLogger } from "../logger.js";
+
+const log = createLogger("stream-manager");
 
 interface BufferedEvent {
 	event: string;
@@ -65,7 +68,7 @@ async function safePersist(
 			stream.toolCallsData,
 		);
 	} catch {
-		// Conversation may have been deleted
+		log.warn("Persist failed", { conversationId });
 	}
 }
 
@@ -230,11 +233,12 @@ async function consumeStream(
 					);
 					emit(parsed.type, JSON.stringify(obj));
 				} catch {
-					// Skip unparseable
+					log.debug("SSE parse error");
 				}
 			}
 		}
 	} catch {
+		log.error("Stream consumption error");
 		status = "error";
 	} finally {
 		reader.releaseLock();
@@ -245,7 +249,7 @@ async function consumeStream(
 		try {
 			onComplete(stream.fullContent);
 		} catch {
-			// onComplete is fire-and-forget
+			log.warn("onComplete error");
 		}
 	}
 	scheduleCleanup(stream.conversationId);
@@ -260,7 +264,7 @@ function createEmitter(
 			try {
 				cb(event, data);
 			} catch {
-				// subscriber errored
+				log.warn("Subscriber error");
 			}
 		}
 	};
@@ -274,8 +278,10 @@ export function startStream(
 ): ActiveStream {
 	const existing = activeStreams.get(conversationId);
 	if (existing && existing.status === "streaming") {
+		log.debug("Reusing existing stream", { conversationId });
 		return existing;
 	}
+	log.info("Stream started", { conversationId });
 
 	const stream: ActiveStream = {
 		conversationId,

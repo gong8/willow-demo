@@ -1,5 +1,6 @@
 import { getDisallowedTools } from "./agent-tools.js";
 import type { SSEEmitter, ToolCallData } from "./cli-chat.js";
+import { createLogger } from "../logger.js";
 import {
 	cleanupDir,
 	createInvocationDir,
@@ -9,6 +10,8 @@ import {
 	writeMcpConfig,
 	writeSystemPrompt,
 } from "./cli-chat.js";
+
+const log = createLogger("search-agent");
 
 const SEARCH_SYSTEM_PROMPT = `You are a memory search agent. Your job is to navigate a knowledge tree to find information relevant to the user's message.
 
@@ -57,6 +60,7 @@ export function runSearchAgent(
 	const { userMessage, mcpServerPath, emitSSE, signal } = options;
 
 	return new Promise((resolve) => {
+		log.info("Search started", { queryLength: userMessage.length });
 		const toolCalls: ToolCallData[] = [];
 		let textOutput = "";
 
@@ -97,6 +101,7 @@ export function runSearchAgent(
 		try {
 			proc = spawnCli(args, invocationDir);
 		} catch {
+			log.error("CLI spawn failed");
 			cleanupDir(invocationDir);
 			resolve({ contextSummary: "", toolCalls: [] });
 			return;
@@ -154,7 +159,7 @@ export function runSearchAgent(
 					textOutput += parsed.content;
 				}
 			} catch {
-				// ignore parse errors
+				log.debug("Emitter parse error");
 			}
 		};
 
@@ -169,13 +174,15 @@ export function runSearchAgent(
 
 		pipeStdout(proc, parser);
 
-		proc.stderr?.on("data", () => {
-			// silently discard
+		proc.stderr?.on("data", (chunk: Buffer) => {
+			const text = chunk.toString().trim();
+			if (text) log.debug("stderr", { text: text.slice(0, 1000) });
 		});
 
 		const finish = () => {
 			cleanupDir(invocationDir);
 			const contextSummary = extractMemoryContext(textOutput);
+			log.info("Search complete", { contextLength: contextSummary.length, toolCalls: toolCalls.length });
 			resolve({ contextSummary, toolCalls });
 		};
 

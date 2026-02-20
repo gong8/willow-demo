@@ -5,7 +5,9 @@ import { homedir } from "node:os";
 import { extname, join } from "node:path";
 import { PrismaClient } from "@prisma/client";
 import { Hono } from "hono";
+import { createLogger } from "../logger.js";
 
+const log = createLogger("attachments");
 const db = new PrismaClient();
 
 const ATTACHMENTS_DIR = join(homedir(), ".willow", "chat-attachments");
@@ -54,6 +56,8 @@ attachmentRoutes.post("/", async (c) => {
 		select: { id: true, filename: true, contentType: true },
 	});
 
+	log.info("Attachment uploaded", { id, filename: file.name, size: buffer.length });
+
 	return c.json(
 		{
 			id: attachment.id,
@@ -75,6 +79,7 @@ attachmentRoutes.get("/:id", async (c) => {
 	}
 
 	const data = await readFile(attachment.diskPath);
+	log.debug("Attachment served", { id });
 	c.header("Content-Type", attachment.contentType);
 	c.header("Cache-Control", "public, max-age=31536000, immutable");
 	return c.body(data);
@@ -99,5 +104,6 @@ attachmentRoutes.delete("/:id", async (c) => {
 	await db.chatAttachment.delete({ where: { id } });
 	await rm(attachment.diskPath, { force: true });
 
+	log.info("Attachment deleted", { id });
 	return c.json({ ok: true });
 });

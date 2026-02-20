@@ -4,14 +4,18 @@ use chrono::Utc;
 use std::collections::HashMap;
 use std::fs;
 use std::path::Path;
+use tracing::{info, debug};
 
 pub fn load_graph(path: &Path) -> Result<Graph, WillowError> {
+    debug!(path = %path.display(), "loading graph");
     let data = fs::read_to_string(path)?;
     let graph: Graph = serde_json::from_str(&data)?;
+    info!(nodes = graph.nodes.len(), links = graph.links.len(), "graph loaded");
     Ok(graph)
 }
 
 pub fn save_graph(path: &Path, graph: &Graph) -> Result<(), WillowError> {
+    debug!(path = %path.display(), "saving graph");
     let json = serde_json::to_string_pretty(graph)?;
     let tmp_path = path.with_extension("tmp");
     fs::write(&tmp_path, &json)?;
