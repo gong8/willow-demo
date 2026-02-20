@@ -84,6 +84,12 @@ const deleteNodeSchema = z.object({
 		.describe("ID of the node to delete (cascades to all descendants)"),
 });
 
+const deleteLinkSchema = z.object({
+	linkId: z
+		.string()
+		.describe("ID of the link to delete"),
+});
+
 const walkGraphSchema = z.object({
 	action: z
 		.enum(["start", "down", "up", "done"])
@@ -102,6 +108,7 @@ export const schemas = {
 	createNode: createNodeSchema,
 	updateNode: updateNodeSchema,
 	addLink: addLinkSchema,
+	deleteLink: deleteLinkSchema,
 	searchNodes: searchNodesSchema,
 	getContext: getContextSchema,
 	deleteNode: deleteNodeSchema,
@@ -114,4 +121,5 @@ export type AddLinkInput = z.infer<typeof addLinkSchema>;
 export type SearchNodesInput = z.infer<typeof searchNodesSchema>;
 export type GetContextInput = z.infer<typeof getContextSchema>;
 export type DeleteNodeInput = z.infer<typeof deleteNodeSchema>;
+export type DeleteLinkInput = z.infer<typeof deleteLinkSchema>;
 export type WalkGraphInput = z.infer<typeof walkGraphSchema>;

@@ -226,6 +226,25 @@ server.tool(
 	},
 );
 
+// delete_link
+server.tool(
+	"delete_link",
+	"Delete a link between two nodes by its link ID.",
+	schemas.deleteLink.shape,
+	async ({ linkId }) => {
+		try {
+			log.info("delete_link", { linkId });
+			const link = store.deleteLink(linkId);
+			return {
+				content: [{ type: "text", text: JSON.stringify(link, null, 2) }],
+			};
+		} catch (e) {
+			log.error("delete_link failed", { error: (e as Error).message });
+			throw e;
+		}
+	},
+);
+
 // add_link
 server.tool(
 	"add_link",

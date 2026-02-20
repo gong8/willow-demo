@@ -446,6 +446,16 @@ impl JsGraphStore {
         Ok(link_to_js(&link))
     }
 
+    #[napi]
+    pub fn delete_link(&mut self, link_id: String) -> napi::Result<JsLink> {
+        info!(link_id = %link_id, "delete_link");
+        let link = self
+            .inner
+            .delete_link(&link_id)
+            .map_err(napi::Error::from)?;
+        Ok(link_to_js(&link))
+    }
+
     // ---- VCS methods ----
 
     #[napi]

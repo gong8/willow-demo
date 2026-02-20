@@ -488,6 +488,26 @@ impl GraphStore {
         Ok(link)
     }
 
+    pub fn delete_link(&mut self, link_id: &str) -> Result<Link, WillowError> {
+        debug!(link_id = %link_id, "delete_link");
+        let lid = LinkId(link_id.to_string());
+
+        let link = self
+            .graph
+            .links
+            .remove(&lid)
+            .ok_or_else(|| WillowError::LinkNotFound(link_id.to_string()))?;
+
+        self.save()?;
+
+        self.record_change(Change::RemoveLink {
+            link_id: lid,
+            link: link.clone(),
+        });
+
+        Ok(link)
+    }
+
     pub fn search_nodes(
         &self,
         query: &str,
