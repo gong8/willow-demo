@@ -51,16 +51,43 @@ graphRoutes.get("/", (c) => {
 	}
 });
 
-// GET /status — HEAD hash + whether there are uncommitted changes
+// GET /status — HEAD hash + whether on-disk graph differs from last commit
 graphRoutes.get("/status", (c) => {
 	try {
 		const store = getStore();
 		const headHash = store.headHash() ?? null;
-		const hasLocalChanges = store.hasLocalChanges();
+
+		let hasLocalChanges = false;
+		if (headHash && existsSync(GRAPH_PATH)) {
+			try {
+				const diff = store.diffDiskVsHead();
+				hasLocalChanges =
+					diff.nodesCreated.length > 0 ||
+					diff.nodesUpdated.length > 0 ||
+					diff.nodesDeleted.length > 0 ||
+					diff.linksCreated.length > 0 ||
+					diff.linksRemoved.length > 0;
+			} catch {
+				// If comparison fails, assume no changes
+			}
+		}
+
 		return c.json({ headHash, hasLocalChanges });
 	} catch (e: unknown) {
 		log.error("Failed to get status", { error: (e as Error).message });
 		return c.json({ headHash: null, hasLocalChanges: false });
+	}
+});
+
+// GET /status/diff — diff between on-disk graph and HEAD commit
+graphRoutes.get("/status/diff", (c) => {
+	try {
+		const store = getStore();
+		const diff = store.diffDiskVsHead();
+		return c.json(diff);
+	} catch (e: unknown) {
+		log.error("Failed to get local diff", { error: (e as Error).message });
+		return c.json({ error: (e as Error).message }, 400);
 	}
 });
 

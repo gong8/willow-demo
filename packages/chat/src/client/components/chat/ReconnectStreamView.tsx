@@ -4,6 +4,7 @@ import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { ReasoningDisplay } from "./ReasoningDisplay.js";
 import { SearchGraphViz } from "./graph-viz/SearchGraphViz.js";
+import { WillowToolViz } from "./graph-viz/WillowToolViz.js";
 import { getToolLabel } from "./ToolCallDisplay.js";
 
 // ─── Types ───
@@ -80,6 +81,62 @@ function ReconnectSearchIndicator({
 	);
 }
 
+const INDEXER_SEARCH_TOOLS = new Set([
+	"mcp__willow__search_nodes",
+	"mcp__willow__get_context",
+]);
+
+function ReconnectIndexerIndicator({
+	toolCalls,
+	allDone,
+}: {
+	toolCalls: Array<{
+		toolCallId: string;
+		toolName: string;
+		args: Record<string, unknown>;
+		result?: string;
+		isError?: boolean;
+	}>;
+	allDone: boolean;
+}) {
+	const isRunning = !allDone;
+
+	// Only show mutation tool calls (exclude searches), matching IndexerIndicator
+	const updateCalls = toolCalls.filter(
+		(tc) => !INDEXER_SEARCH_TOOLS.has(tc.toolName),
+	);
+	const currentTc = updateCalls[updateCalls.length - 1];
+
+	return (
+		<div
+			className={`my-1.5 rounded-lg border border-border bg-background text-sm transition-opacity ${
+				!isRunning ? "opacity-80" : "opacity-100"
+			}`}
+		>
+			<div className="flex items-center gap-2 px-3 py-2">
+				{isRunning ? (
+					<Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin text-violet-500" />
+				) : (
+					<Check className="h-3.5 w-3.5 shrink-0 text-green-600" />
+				)}
+				<span className="flex-1 text-muted-foreground">
+					{isRunning ? "Updating memory..." : "Memory updated"}
+				</span>
+			</div>
+			{currentTc && (
+				<div className="border-t border-border px-3 py-2">
+					<WillowToolViz
+						toolName={currentTc.toolName}
+						args={currentTc.args ?? {}}
+						result={currentTc.result}
+						isError={currentTc.isError}
+					/>
+				</div>
+			)}
+		</div>
+	);
+}
+
 export function ReconnectStreamView({ stream }: { stream: ReconnectStream }) {
 	const cleanContent = stream.content
 		.replace(/<tool_call>[\s\S]*?<\/tool_call>/g, "")
@@ -89,59 +146,85 @@ export function ReconnectStreamView({ stream }: { stream: ReconnectStream }) {
 		.replace(/\n{3,}/g, "\n\n")
 		.trim();
 
-	const { searchCalls, regularCalls, hasSearchPhase, searchDone } =
-		useMemo(() => {
-			const searchCalls: Array<{
-				toolCallId: string;
-				toolName: string;
-				args: Record<string, unknown>;
-				result?: string;
-				isError?: boolean;
-			}> = [];
-			const regularCalls: Array<{
-				toolCallId: string;
-				toolName: string;
-				args: Record<string, unknown>;
-				result?: string;
-				isError?: boolean;
-			}> = [];
+	const {
+		searchCalls,
+		indexerCalls,
+		regularCalls,
+		hasSearchPhase,
+		hasIndexerPhase,
+		searchDone,
+		indexerDone,
+	} = useMemo(() => {
+		const searchCalls: Array<{
+			toolCallId: string;
+			toolName: string;
+			args: Record<string, unknown>;
+			result?: string;
+			isError?: boolean;
+		}> = [];
+		const indexerCalls: Array<{
+			toolCallId: string;
+			toolName: string;
+			args: Record<string, unknown>;
+			result?: string;
+			isError?: boolean;
+		}> = [];
+		const regularCalls: Array<{
+			toolCallId: string;
+			toolName: string;
+			args: Record<string, unknown>;
+			result?: string;
+			isError?: boolean;
+		}> = [];
 
-			for (const tc of stream.toolCalls.values()) {
-				if (isSearchToolCall(tc.toolCallId)) {
-					searchCalls.push({
-						toolCallId: tc.toolCallId,
-						toolName: tc.toolName,
-						args: tc.args ?? {},
-						result: tc.result,
-						isError: tc.isError,
-					});
-				} else if (
-					isCoordinatorSearchTool(tc.toolName) ||
-					isIndexerToolCall(tc.toolCallId)
-				) {
-					// Hide coordinator search_memories and indexer tool calls
-				} else {
-					regularCalls.push({
-						toolCallId: tc.toolCallId,
-						toolName: tc.toolName,
-						args: tc.args ?? {},
-						result: tc.result,
-						isError: tc.isError,
-					});
-				}
+		for (const tc of stream.toolCalls.values()) {
+			if (isSearchToolCall(tc.toolCallId)) {
+				searchCalls.push({
+					toolCallId: tc.toolCallId,
+					toolName: tc.toolName,
+					args: tc.args ?? {},
+					result: tc.result,
+					isError: tc.isError,
+				});
+			} else if (isIndexerToolCall(tc.toolCallId)) {
+				indexerCalls.push({
+					toolCallId: tc.toolCallId,
+					toolName: tc.toolName,
+					args: tc.args ?? {},
+					result: tc.result,
+					isError: tc.isError,
+				});
+			} else if (isCoordinatorSearchTool(tc.toolName)) {
+				// Hide coordinator search_memories
+			} else {
+				regularCalls.push({
+					toolCallId: tc.toolCallId,
+					toolName: tc.toolName,
+					args: tc.args ?? {},
+					result: tc.result,
+					isError: tc.isError,
+				});
 			}
+		}
 
-			const searchDone =
-				searchCalls.length > 0 &&
-				searchCalls.every((tc) => tc.result !== undefined);
+		const searchDone =
+			searchCalls.length > 0 &&
+			searchCalls.every((tc) => tc.result !== undefined);
 
-			return {
-				searchCalls,
-				regularCalls,
-				hasSearchPhase: searchCalls.length > 0,
-				searchDone,
-			};
-		}, [stream.toolCalls]);
+		const indexerDone =
+			indexerCalls.length > 0 &&
+			indexerCalls.every((tc) => tc.result !== undefined);
+
+		return {
+			searchCalls,
+			indexerCalls,
+			regularCalls,
+			hasSearchPhase: searchCalls.length > 0,
+			hasIndexerPhase: indexerCalls.length > 0,
+			searchDone,
+			indexerDone,
+		};
+	}, [stream.toolCalls]);
 
 	return (
 		<div className="group flex px-4 py-2">
@@ -150,6 +233,12 @@ export function ReconnectStreamView({ stream }: { stream: ReconnectStream }) {
 					<ReconnectSearchIndicator
 						toolCalls={searchCalls}
 						allDone={searchDone}
+					/>
+				)}
+				{hasIndexerPhase && (
+					<ReconnectIndexerIndicator
+						toolCalls={indexerCalls}
+						allDone={indexerDone}
 					/>
 				)}
 				<div className="prose prose-sm max-w-none rounded-2xl bg-muted px-4 py-2">

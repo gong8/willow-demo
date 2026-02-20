@@ -1,5 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useMemo, useRef } from "react";
 import type {
 	GraphEdge,
 	GraphNode,
@@ -78,45 +78,21 @@ export function WillowToolViz({
 		};
 	}, [stableSubgraph, animation]);
 
-	// IntersectionObserver to only mount canvas when visible (WebGL context limit)
-	const containerRef = useRef<HTMLDivElement>(null);
-	const [isVisible, setIsVisible] = useState(false);
-
 	const shouldRender =
 		!!stableSubgraph && stableSubgraph.nodes.length >= 2 && !isError;
-
-	useEffect(() => {
-		if (!shouldRender) return;
-		const el = containerRef.current;
-		if (!el) return;
-
-		const observer = new IntersectionObserver(
-			([entry]) => {
-				if (entry.isIntersecting) {
-					setIsVisible(true);
-					observer.disconnect();
-				}
-			},
-			{ threshold: 0 },
-		);
-
-		observer.observe(el);
-		return () => observer.disconnect();
-	}, [shouldRender]);
 
 	if (!shouldRender) {
 		return null;
 	}
 
 	return (
-		<div ref={containerRef} className="mt-1 min-h-[4px]">
-			{isVisible && (
-				<MiniGraphCanvas
-					nodes={displayNodes}
-					edges={displayEdges}
-					selections={selections}
-				/>
-			)}
+		<div className="mt-1 min-h-[4px]">
+			{/* Graph canvas — always render, no lazy loading */}
+			<MiniGraphCanvas
+				nodes={displayNodes}
+				edges={displayEdges}
+				selections={selections}
+			/>
 		</div>
 	);
 }

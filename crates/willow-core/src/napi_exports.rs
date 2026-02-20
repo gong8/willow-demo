@@ -639,4 +639,30 @@ impl JsGraphStore {
             .map_err(napi::Error::from)?;
         Ok(new_hash.0)
     }
+
+    /// Diff the on-disk graph file against the HEAD commit.
+    /// Returns the change summary (empty if identical or no HEAD).
+    #[napi]
+    pub fn diff_disk_vs_head(&self) -> napi::Result<JsChangeSummary> {
+        debug!("diff_disk_vs_head");
+        let repo = self.inner.get_repo().map_err(napi::Error::from)?;
+        let entries = repo.log(Some(1)).map_err(napi::Error::from)?;
+        let head = match entries.first() {
+            Some(e) => &e.hash,
+            None => {
+                return Ok(JsChangeSummary {
+                    nodes_created: vec![],
+                    nodes_updated: vec![],
+                    nodes_deleted: vec![],
+                    links_created: vec![],
+                    links_removed: vec![],
+                });
+            }
+        };
+        let committed = repo.reconstruct_at(head).map_err(napi::Error::from)?;
+        let disk = crate::storage::load_graph(&self.inner.path)
+            .map_err(napi::Error::from)?;
+        let diff = crate::vcs::diff::compute_graph_diff(&committed, &disk);
+        Ok(change_summary_to_js(&diff))
+    }
 }
