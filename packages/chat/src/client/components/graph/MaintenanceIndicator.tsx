@@ -7,7 +7,7 @@ import {
 	Wrench,
 } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
-import type { EnrichmentProgress } from "../../lib/api.js";
+import type { MaintenanceProgress } from "../../lib/api.js";
 import { useMaintenanceStatus } from "../../hooks/useMaintenanceStatus.js";
 
 const PHASE_WEIGHTS = {
@@ -18,7 +18,7 @@ const PHASE_WEIGHTS = {
 	done: { start: 100, weight: 0 },
 } as const;
 
-function computeOverallPercent(progress: EnrichmentProgress): number {
+function computeOverallPercent(progress: MaintenanceProgress): number {
 	const pw = PHASE_WEIGHTS[progress.phase];
 	if (progress.phase === "done") return 100;
 	if (progress.phase === "crawling" && progress.crawlersTotal > 0) {
@@ -37,7 +37,7 @@ function formatDuration(ms: number): string {
 	return `${minutes}m ${remaining}s`;
 }
 
-function computeEta(progress: EnrichmentProgress): string | null {
+function computeEta(progress: MaintenanceProgress): string | null {
 	if (
 		progress.phase !== "crawling" ||
 		progress.crawlersComplete === 0 ||
@@ -70,7 +70,7 @@ function ProgressBar({
 	);
 }
 
-function ProgressPanel({ progress, job }: { progress: EnrichmentProgress; job: { status: string; startedAt: string; completedAt?: string } }) {
+function ProgressPanel({ progress, job }: { progress: MaintenanceProgress; job: { status: string; startedAt: string; completedAt?: string } }) {
 	const percent = computeOverallPercent(progress);
 	const eta = computeEta(progress);
 	const isResolving = progress.phase === "resolving";

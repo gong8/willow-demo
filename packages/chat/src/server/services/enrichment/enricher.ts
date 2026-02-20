@@ -8,7 +8,7 @@ import { spawnCrawlers } from "./crawler.js";
 import { runPreScan } from "./pre-scan.js";
 import { spawnResolver } from "./resolver.js";
 import type {
-	EnrichmentProgress,
+	MaintenanceProgress,
 	EnrichmentReport,
 	ProgressCallback,
 	RawGraph,
@@ -69,7 +69,7 @@ export async function runEnrichment(options: {
 	const start = Date.now();
 	log.info("Enrichment started", { trigger: options.trigger });
 
-	const progress: EnrichmentProgress = {
+	const progress: MaintenanceProgress = {
 		phase: "pre-scan",
 		phaseLabel: "Scanning graph...",
 		crawlersTotal: 0,
@@ -80,7 +80,7 @@ export async function runEnrichment(options: {
 	};
 
 	const emitProgress = (
-		updates: Partial<EnrichmentProgress>,
+		updates: Partial<MaintenanceProgress>,
 	) => {
 		Object.assign(progress, updates);
 		options.onProgress?.({ ...progress });

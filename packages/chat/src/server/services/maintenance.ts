@@ -5,7 +5,7 @@ import { JsGraphStore } from "@willow/core";
 import { createLogger } from "../logger.js";
 import type { ToolCallData } from "./cli-chat.js";
 import { runEnrichment } from "./enrichment/enricher.js";
-import type { EnrichmentProgress } from "./enrichment/types.js";
+import type { MaintenanceProgress } from "./enrichment/types.js";
 
 const log = createLogger("maintenance");
 
@@ -18,7 +18,7 @@ export interface MaintenanceJob {
 	status: "running" | "complete" | "error";
 	trigger: "manual" | "auto";
 	toolCalls: ToolCallData[];
-	progress: EnrichmentProgress | null;
+	progress: MaintenanceProgress | null;
 	startedAt: Date;
 	completedAt?: Date;
 }

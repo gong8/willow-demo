@@ -47,7 +47,7 @@ export interface EnrichmentReport {
 	durationMs: number;
 }
 
-export interface EnrichmentProgress {
+export interface MaintenanceProgress {
 	phase: "pre-scan" | "crawling" | "resolving" | "committing" | "done";
 	phaseLabel: string;
 	crawlersTotal: number;
@@ -57,7 +57,7 @@ export interface EnrichmentProgress {
 	phaseStartedAt: number;
 }
 
-export type ProgressCallback = (progress: EnrichmentProgress) => void;
+export type ProgressCallback = (progress: MaintenanceProgress) => void;
 
 // Raw graph JSON types (matching graph.json structure)
 export interface RawGraph {
