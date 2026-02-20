@@ -1,6 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import { Network } from "lucide-react";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { GraphCanvas } from "reagraph";
 import { transformGraphData } from "../../lib/graph-transform.js";
 import type {
@@ -94,19 +94,26 @@ export function GraphView(_props: { activeConversationId: string | null }) {
 		});
 	}, [graph, enabledTypes, enabledRelations, searchQuery]);
 
-	// Add newly discovered relation types to the enabled set
+	// Track which relation types we've already seen so we only auto-enable genuinely new ones
+	const seenRelationTypes = useRef(new Set<string>());
+
+	// Add newly discovered relation types to the enabled set (but don't re-add ones the user toggled off)
 	useEffect(() => {
 		if (stats.relationTypes.length === 0) return;
+		const newTypes: string[] = [];
+		for (const rt of stats.relationTypes) {
+			if (!seenRelationTypes.current.has(rt)) {
+				seenRelationTypes.current.add(rt);
+				newTypes.push(rt);
+			}
+		}
+		if (newTypes.length === 0) return;
 		setEnabledRelations((prev) => {
 			const next = new Set(prev);
-			let changed = false;
-			for (const rt of stats.relationTypes) {
-				if (!next.has(rt)) {
-					next.add(rt);
-					changed = true;
-				}
+			for (const rt of newTypes) {
+				next.add(rt);
 			}
-			return changed ? next : prev;
+			return next;
 		});
 	}, [stats.relationTypes]);
 
