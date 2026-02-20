@@ -1,23 +1,10 @@
 import { type Mock, beforeEach, describe, expect, it, vi } from "vitest";
-import type { CrawlerReport, Finding } from "../types.js";
+import { createMockProc, mockCliChatUtils } from "../../__tests__/helpers";
+import type { Finding } from "../types.js";
 
-// Mock cli-chat before importing crawler
 vi.mock("../../cli-chat.js", async (importOriginal) => {
 	const actual = await importOriginal<typeof import("../../cli-chat.js")>();
-	return {
-		...actual,
-		LLM_MODEL: "test-model",
-		spawnCli: vi.fn(),
-		writeSystemPrompt: vi.fn(() => "/tmp/prompt.txt"),
-		writeMcpConfig: vi.fn(() => "/tmp/config.json"),
-		createInvocationDir: vi.fn(() => "/tmp/inv"),
-		cleanupDir: vi.fn(),
-		getCliModel: vi.fn(() => "sonnet"),
-		createStreamParser: vi.fn(() => ({
-			process: vi.fn(),
-		})),
-		pipeStdout: vi.fn(),
-	};
+	return { ...actual, ...mockCliChatUtils() };
 });
 
 vi.mock("../../agent-tools.js", () => ({
@@ -26,26 +13,6 @@ vi.mock("../../agent-tools.js", () => ({
 
 import { spawnCli } from "../../cli-chat.js";
 import { spawnCrawler, spawnCrawlers } from "../crawler.js";
-
-function createMockProc(textToEmit?: string) {
-	const listeners: Record<string, ((...args: unknown[]) => void)[]> = {};
-	return {
-		stdout: {
-			on: vi.fn((event: string, handler: (data: Buffer) => void) => {
-				if (event === "data" && textToEmit)
-					setTimeout(() => handler(Buffer.from(textToEmit)), 5);
-			}),
-		},
-		stderr: { on: vi.fn() },
-		stdin: { end: vi.fn() },
-		on: vi.fn((event: string, cb: () => void) => {
-			if (!listeners[event]) listeners[event] = [];
-			listeners[event].push(cb);
-			if (event === "close") setTimeout(cb, 20);
-		}),
-		kill: vi.fn(),
-	};
-}
 
 const sharedOpts = {
 	mcpServerPath: "/mcp",

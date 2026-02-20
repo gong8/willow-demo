@@ -1,8 +1,8 @@
-import type { WillowGraph } from "./graph-types.js";
+import type { WillowGraph } from "./graph-types";
 
 const BASE_URL = "/api";
 
-async function throwIfNotOk(res: Response, fallback = "Request failed") {
+async function assertOk(res: Response, fallback = "Request failed") {
 	if (!res.ok) {
 		const err = await res.json();
 		throw new Error(err.error || fallback);
@@ -14,11 +14,7 @@ async function fetchJson<T>(path: string): Promise<T> {
 	return res.json();
 }
 
-async function postJson<T>(
-	path: string,
-	body?: unknown,
-	{ checkOk = false }: { checkOk?: boolean } = {},
-): Promise<T> {
+async function postJson<T>(path: string, body?: unknown): Promise<T> {
 	const res = await fetch(`${BASE_URL}${path}`, {
 		method: "POST",
 		...(body !== undefined && {
@@ -26,7 +22,7 @@ async function postJson<T>(
 			body: JSON.stringify(body),
 		}),
 	});
-	if (checkOk) await throwIfNotOk(res);
+	await assertOk(res);
 	return res.json();
 }
 
@@ -151,12 +147,12 @@ export async function uploadResource(file: File): Promise<Resource> {
 		method: "POST",
 		body: formData,
 	});
-	await throwIfNotOk(res, "Upload failed");
+	await assertOk(res, "Upload failed");
 	return res.json();
 }
 
 export function createUrlResource(url: string): Promise<Resource> {
-	return postJson("/resources/url", { url }, { checkOk: true });
+	return postJson("/resources/url", { url });
 }
 
 export function deleteResource(id: string): Promise<void> {
@@ -169,19 +165,10 @@ export function fetchResourceContent(
 	return fetchJson(`/resources/${id}/content`);
 }
 
-export async function indexResourceStream(
-	id: string,
-	context?: string,
+async function consumeSSE(
+	res: Response,
 	onEvent?: (event: string, data: string) => void,
 ): Promise<void> {
-	const res = await fetch(`${BASE_URL}/resources/${id}/index`, {
-		method: "POST",
-		headers: { "Content-Type": "application/json" },
-		body: JSON.stringify({ context }),
-	});
-
-	await throwIfNotOk(res, "Indexing failed");
-
 	const reader = res.body?.getReader();
 	if (!reader) return;
 
@@ -201,12 +188,25 @@ export async function indexResourceStream(
 			if (line.startsWith("event: ")) {
 				currentEvent = line.slice(7);
 			} else if (line.startsWith("data: ")) {
-				const data = line.slice(6);
-				onEvent?.(currentEvent, data);
+				onEvent?.(currentEvent, line.slice(6));
 				if (currentEvent === "done") return;
 			}
 		}
 	}
+}
+
+export async function indexResourceStream(
+	id: string,
+	context?: string,
+	onEvent?: (event: string, data: string) => void,
+): Promise<void> {
+	const res = await fetch(`${BASE_URL}/resources/${id}/index`, {
+		method: "POST",
+		headers: { "Content-Type": "application/json" },
+		body: JSON.stringify({ context }),
+	});
+	await assertOk(res, "Indexing failed");
+	return consumeSSE(res, onEvent);
 }
 
 // --- VCS types ---

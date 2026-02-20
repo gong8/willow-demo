@@ -4,9 +4,9 @@ import type {
 	GraphEdge,
 	GraphNode,
 	WillowGraph,
-} from "../../../lib/graph-types.js";
-import { buildSubgraphFromNodes } from "./subgraph-extractors.js";
-import { type SearchToolCall, fetchGraph } from "./types.js";
+} from "../../../lib/graph-types";
+import { buildSubgraphFromNodes } from "./subgraph-extractors";
+import { type SearchToolCall, fetchGraph } from "./types";
 
 const MAX_MERGED_NODES = 80;
 
@@ -23,13 +23,12 @@ export interface WalkStep {
 function parseWalkResult(result: unknown) {
 	try {
 		const parsed = typeof result === "string" ? JSON.parse(result) : result;
-		if (!parsed || typeof parsed !== "object") return null;
 		const p = parsed as {
 			position?: { id: string; content?: string };
 			path?: { id: string }[];
 			children?: { id: string }[];
 		};
-		if (!p.position) return null;
+		if (!p?.position) return null;
 		return {
 			positionId: p.position.id,
 			positionContent: p.position.content ?? null,
@@ -38,6 +37,36 @@ function parseWalkResult(result: unknown) {
 		};
 	} catch {
 		return null;
+	}
+}
+
+function buildStep(
+	tc: SearchToolCall,
+	walkData: ReturnType<typeof parseWalkResult>,
+): WalkStep {
+	const action = (tc.args?.action as string) ?? "start";
+	return {
+		toolCallId: tc.toolCallId,
+		action: action === "done" ? "done" : action,
+		positionId: walkData?.positionId ?? null,
+		positionContent: walkData?.positionContent ?? null,
+		pathIds: walkData?.pathIds ?? [],
+		childIds: walkData?.childIds ?? [],
+		status: tc.result != null ? "settled" : "pending",
+	};
+}
+
+function collectNodeIds(
+	walkData: ReturnType<typeof parseWalkResult>,
+	graph: WillowGraph,
+	into: Set<string>,
+) {
+	if (!walkData) return;
+	for (const id of [...walkData.pathIds, ...walkData.childIds]) {
+		if (graph.nodes[id]) into.add(id);
+	}
+	if (walkData.positionId && graph.nodes[walkData.positionId]) {
+		into.add(walkData.positionId);
 	}
 }
 
@@ -68,33 +97,15 @@ export function useCumulativeSearchGraph(
 		for (const tc of toolCalls) {
 			const action = (tc.args?.action as string) ?? "start";
 			const hasResult = tc.result != null;
-			const isDone = action === "done";
+			const walkData =
+				action !== "done" && hasResult ? parseWalkResult(tc.result) : null;
 
-			// Parse walk result for non-done actions that have results
-			const walkData = !isDone && hasResult ? parseWalkResult(tc.result) : null;
-
-			if (walkData) {
-				for (const id of [...walkData.pathIds, ...walkData.childIds]) {
-					if (graph.nodes[id]) mergedNodeIds.add(id);
-				}
-				if (walkData.positionId && graph.nodes[walkData.positionId]) {
-					mergedNodeIds.add(walkData.positionId);
-				}
-			}
-
-			steps.push({
-				toolCallId: tc.toolCallId,
-				action: isDone ? "done" : action,
-				positionId: walkData?.positionId ?? null,
-				positionContent: walkData?.positionContent ?? null,
-				pathIds: walkData?.pathIds ?? [],
-				childIds: walkData?.childIds ?? [],
-				status: hasResult ? "settled" : "pending",
-			});
-
+			collectNodeIds(walkData, graph, mergedNodeIds);
+			steps.push(buildStep(tc, walkData));
 			if (hasResult) latestSettledIndex = steps.length - 1;
 		}
 
+		// Trim to cap if needed
 		if (mergedNodeIds.size > MAX_MERGED_NODES) {
 			const keep = [...mergedNodeIds].slice(0, MAX_MERGED_NODES);
 			mergedNodeIds.clear();
@@ -110,9 +121,10 @@ export function useCumulativeSearchGraph(
 		return buildSubgraphFromNodes(graph, mergedNodeIds);
 	}, [graph, mergedNodeIds]);
 
+	// Find the latest settled step with a position
 	let focusId: string | null = null;
-	for (let i = latestSettledIndex; i >= 0; i--) {
-		if (steps[i].positionId) {
+	for (let i = steps.length - 1; i >= 0; i--) {
+		if (steps[i].positionId && steps[i].status === "settled") {
 			focusId = steps[i].positionId;
 			break;
 		}

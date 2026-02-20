@@ -1,5 +1,5 @@
 use crate::model::{Graph, Link, Node, NodeId};
-use crate::vcs::types::CommitHash;
+use crate::vcs::types::{add_child, remove_child, remove_node, CommitHash};
 use std::collections::{HashSet, VecDeque};
 
 #[derive(Debug, Clone)]
@@ -53,29 +53,8 @@ fn node_modified(node: &Node, base: &Node) -> bool {
     node.content != base.content || node.metadata != base.metadata
 }
 
-fn modify_parent(graph: &mut Graph, parent_id: &NodeId, child_id: &NodeId, add: bool) {
-    if let Some(parent) = graph.nodes.get_mut(parent_id) {
-        if add {
-            if !parent.children.contains(child_id) {
-                parent.children.push(child_id.clone());
-            }
-        } else {
-            parent.children.retain(|c| c != child_id);
-        }
-    }
-}
-
-fn remove_node(graph: &mut Graph, node_id: &NodeId) {
-    if let Some(pid) = graph.nodes.get(node_id).and_then(|n| n.parent_id.clone()) {
-        modify_parent(graph, &pid, node_id, false);
-    }
-    graph.nodes.remove(node_id);
-}
-
-fn parent_id_or_empty(node: &Node) -> NodeId {
-    node.parent_id
-        .clone()
-        .unwrap_or(NodeId("".to_string()))
+fn empty_node_id() -> NodeId {
+    NodeId(String::new())
 }
 
 fn bfs_expand(
@@ -117,14 +96,20 @@ pub fn find_merge_base(
             return None;
         }
 
-        if let Some(found) =
-            bfs_expand(&mut ours_queue, &mut ours_visited, &theirs_visited, read_parents)
-        {
+        if let Some(found) = bfs_expand(
+            &mut ours_queue,
+            &mut ours_visited,
+            &theirs_visited,
+            read_parents,
+        ) {
             return Some(found);
         }
-        if let Some(found) =
-            bfs_expand(&mut theirs_queue, &mut theirs_visited, &ours_visited, read_parents)
-        {
+        if let Some(found) = bfs_expand(
+            &mut theirs_queue,
+            &mut theirs_visited,
+            &ours_visited,
+            read_parents,
+        ) {
             return Some(found);
         }
     }
@@ -186,13 +171,13 @@ fn merge_deleted_nodes(
 
 fn reparent_node(merged: &mut Graph, nid: &NodeId, new_parent_id: &Option<NodeId>) {
     if let Some(old_pid) = merged.nodes.get(nid).and_then(|n| n.parent_id.clone()) {
-        modify_parent(merged, &old_pid, nid, false);
+        remove_child(merged, &old_pid, nid);
     }
     if let Some(node) = merged.nodes.get_mut(nid) {
         node.parent_id = new_parent_id.clone();
     }
     if let Some(ref new_pid) = new_parent_id {
-        modify_parent(merged, new_pid, nid, true);
+        add_child(merged, new_pid, nid);
     }
 }
 
@@ -214,35 +199,25 @@ fn three_way_diff<T: PartialEq + Clone>(base: &T, ours: &T, theirs: &T) -> Three
     }
 }
 
-/// Perform a three-way merge of two graphs given a common base.
-pub fn three_way_merge(base: &Graph, ours: &Graph, theirs: &Graph) -> MergeResult {
-    let mut merged = ours.clone();
-    let mut conflicts = Vec::new();
-
-    // 1. Nodes added only by theirs
-    for (nid, node) in &theirs.nodes {
-        if !base.nodes.contains_key(nid) && !ours.nodes.contains_key(nid) {
-            if let Some(ref parent_id) = node.parent_id {
-                modify_parent(&mut merged, parent_id, nid, true);
-            }
-            merged.nodes.insert(nid.clone(), node.clone());
-        }
-    }
-
-    // 2. Nodes deleted by one side, possibly modified by the other
-    merge_deleted_nodes(base, theirs, ours, MergeSide::Theirs, &mut merged, &mut conflicts);
-    merge_deleted_nodes(base, ours, theirs, MergeSide::Ours, &mut merged, &mut conflicts);
-
-    // 3. Nodes present in all three — check content and structural changes
+fn merge_common_nodes(
+    base: &Graph,
+    ours: &Graph,
+    theirs: &Graph,
+    merged: &mut Graph,
+    conflicts: &mut Vec<MergeConflict>,
+) {
     for (nid, base_node) in &base.nodes {
-        let (Some(ours_node), Some(theirs_node)) =
-            (ours.nodes.get(nid), theirs.nodes.get(nid))
+        let (Some(ours_node), Some(theirs_node)) = (ours.nodes.get(nid), theirs.nodes.get(nid))
         else {
             continue;
         };
 
         let content_key = |n: &Node| (n.content.clone(), n.metadata.clone());
-        match three_way_diff(&content_key(base_node), &content_key(ours_node), &content_key(theirs_node)) {
+        match three_way_diff(
+            &content_key(base_node),
+            &content_key(ours_node),
+            &content_key(theirs_node),
+        ) {
             ThreeWayChange::BothDiverged(_, _) => {
                 conflicts.push(MergeConflict {
                     node_id: nid.clone(),
@@ -262,25 +237,32 @@ pub fn three_way_merge(base: &Graph, ours: &Graph, theirs: &Graph) -> MergeResul
             ThreeWayChange::NoAction => {}
         }
 
-        match three_way_diff(&base_node.parent_id, &ours_node.parent_id, &theirs_node.parent_id) {
+        let parent_or_empty = |n: &Node| n.parent_id.clone().unwrap_or_else(empty_node_id);
+        match three_way_diff(
+            &base_node.parent_id,
+            &ours_node.parent_id,
+            &theirs_node.parent_id,
+        ) {
             ThreeWayChange::BothDiverged(_, _) => {
                 conflicts.push(MergeConflict {
                     node_id: nid.clone(),
                     conflict_type: ConflictType::StructuralConflict {
-                        base_parent: parent_id_or_empty(base_node),
-                        ours_parent: parent_id_or_empty(ours_node),
-                        theirs_parent: parent_id_or_empty(theirs_node),
+                        base_parent: parent_or_empty(base_node),
+                        ours_parent: parent_or_empty(ours_node),
+                        theirs_parent: parent_or_empty(theirs_node),
                     },
                 });
             }
             ThreeWayChange::OnlyTheirs(new_parent) => {
-                reparent_node(&mut merged, nid, &new_parent);
+                reparent_node(merged, nid, &new_parent);
             }
             ThreeWayChange::NoAction => {}
         }
     }
+}
 
-    // 4. Merge links from theirs
+fn merge_links(base: &Graph, ours: &Graph, theirs: &Graph, merged: &mut Graph) {
+    // Add links new in theirs (not in base or ours) if both endpoints exist
     for (lid, link) in &theirs.links {
         if !base.links.contains_key(lid)
             && !ours.links.contains_key(lid)
@@ -290,11 +272,52 @@ pub fn three_way_merge(base: &Graph, ours: &Graph, theirs: &Graph) -> MergeResul
             merged.links.insert(lid.clone(), link.clone());
         }
     }
+    // Remove links deleted by theirs
     for lid in base.links.keys() {
         if !theirs.links.contains_key(lid) {
             merged.links.remove(lid);
         }
     }
+}
+
+/// Perform a three-way merge of two graphs given a common base.
+pub fn three_way_merge(base: &Graph, ours: &Graph, theirs: &Graph) -> MergeResult {
+    let mut merged = ours.clone();
+    let mut conflicts = Vec::new();
+
+    // 1. Nodes added only by theirs
+    for (nid, node) in &theirs.nodes {
+        if !base.nodes.contains_key(nid) && !ours.nodes.contains_key(nid) {
+            if let Some(ref parent_id) = node.parent_id {
+                add_child(&mut merged, parent_id, nid);
+            }
+            merged.nodes.insert(nid.clone(), node.clone());
+        }
+    }
+
+    // 2. Nodes deleted by one side, possibly modified by the other
+    merge_deleted_nodes(
+        base,
+        theirs,
+        ours,
+        MergeSide::Theirs,
+        &mut merged,
+        &mut conflicts,
+    );
+    merge_deleted_nodes(
+        base,
+        ours,
+        theirs,
+        MergeSide::Ours,
+        &mut merged,
+        &mut conflicts,
+    );
+
+    // 3. Nodes present in all three — check content and structural changes
+    merge_common_nodes(base, ours, theirs, &mut merged, &mut conflicts);
+
+    // 4. Merge links
+    merge_links(base, ours, theirs, &mut merged);
 
     if conflicts.is_empty() {
         MergeResult::Success(merged)
@@ -331,7 +354,11 @@ mod tests {
         let now = Utc::now();
         Node {
             id: NodeId(id.to_string()),
-            node_type: if parent.is_none() { NodeType::Root } else { NodeType::Detail },
+            node_type: if parent.is_none() {
+                NodeType::Root
+            } else {
+                NodeType::Detail
+            },
             content: content.to_string(),
             parent_id: parent.map(|p| NodeId(p.to_string())),
             children: children.iter().map(|c| NodeId(c.to_string())).collect(),
@@ -346,15 +373,21 @@ mod tests {
     fn add_node(graph: &mut Graph, node: Node) {
         let nid = node.id.clone();
         if let Some(ref pid) = node.parent_id {
-            modify_parent(graph, pid, &nid, true);
+            add_child(graph, pid, &nid);
         }
         graph.nodes.insert(nid, node);
     }
 
     fn base_graph() -> Graph {
         let mut nodes = HashMap::new();
-        nodes.insert(NodeId("root".to_string()), make_node("root", "User", None, &["n1"]));
-        nodes.insert(NodeId("n1".to_string()), make_node("n1", "Base content", Some("root"), &[]));
+        nodes.insert(
+            NodeId("root".to_string()),
+            make_node("root", "User", None, &["n1"]),
+        );
+        nodes.insert(
+            NodeId("n1".to_string()),
+            make_node("n1", "Base content", Some("root"), &[]),
+        );
         Graph {
             root_id: NodeId("root".to_string()),
             nodes,
@@ -398,7 +431,10 @@ mod tests {
         let mut theirs = base.clone();
 
         add_node(&mut ours, make_node("n2", "Ours added", Some("root"), &[]));
-        add_node(&mut theirs, make_node("n3", "Theirs added", Some("root"), &[]));
+        add_node(
+            &mut theirs,
+            make_node("n3", "Theirs added", Some("root"), &[]),
+        );
 
         match three_way_merge(&base, &ours, &theirs) {
             MergeResult::Success(merged) => {
@@ -423,7 +459,11 @@ mod tests {
             MergeResult::Conflicts(conflicts) => {
                 assert_eq!(conflicts.len(), 1);
                 match &conflicts[0].conflict_type {
-                    ConflictType::ContentConflict { base: b, ours: o, theirs: t } => {
+                    ConflictType::ContentConflict {
+                        base: b,
+                        ours: o,
+                        theirs: t,
+                    } => {
                         assert_eq!(b, "Base content");
                         assert_eq!(o, "Ours version");
                         assert_eq!(t, "Theirs version");
@@ -445,7 +485,10 @@ mod tests {
 
         match three_way_merge(&base, &ours, &theirs) {
             MergeResult::Success(merged) => {
-                assert_eq!(merged.nodes.get(&nid("n1")).unwrap().content, "Updated by theirs");
+                assert_eq!(
+                    merged.nodes.get(&nid("n1")).unwrap().content,
+                    "Updated by theirs"
+                );
             }
             other => panic!("Expected success, got {:?}", other),
         }
@@ -476,12 +519,20 @@ mod tests {
 
         ours.nodes.get_mut(&nid("n1")).unwrap().content = "Modified".to_string();
         theirs.nodes.remove(&nid("n1"));
-        theirs.nodes.get_mut(&nid("root")).unwrap().children.retain(|c| c != &nid("n1"));
+        theirs
+            .nodes
+            .get_mut(&nid("root"))
+            .unwrap()
+            .children
+            .retain(|c| c != &nid("n1"));
 
         match three_way_merge(&base, &ours, &theirs) {
             MergeResult::Conflicts(conflicts) => {
                 assert_eq!(conflicts.len(), 1);
-                assert!(matches!(&conflicts[0].conflict_type, ConflictType::DeleteModifyConflict { .. }));
+                assert!(matches!(
+                    &conflicts[0].conflict_type,
+                    ConflictType::DeleteModifyConflict { .. }
+                ));
             }
             other => panic!("Expected conflicts, got {:?}", other),
         }

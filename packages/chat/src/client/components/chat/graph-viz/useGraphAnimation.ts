@@ -1,11 +1,15 @@
-import { useEffect, useRef, useState } from "react";
-import type { AnimationPhase } from "./types.js";
+import { useEffect, useMemo, useRef, useState } from "react";
+import type { AnimationPhase } from "./types";
 
 const PHASE_INTERVAL_MS = 150;
 
-const EMPTY_SET = new Set<string>();
+const EMPTY: AnimationState = {
+	activeNodeIds: new Set(),
+	activeEdgeIds: new Set(),
+	selectedNodeIds: new Set(),
+};
 
-interface AnimationState {
+export interface AnimationState {
 	activeNodeIds: Set<string>;
 	activeEdgeIds: Set<string>;
 	selectedNodeIds: Set<string>;
@@ -34,18 +38,13 @@ export function useGraphAnimation(phases: AnimationPhase[]): AnimationState {
 		};
 	}, [phases]);
 
-	if (phases.length === 0) {
+	return useMemo(() => {
+		if (phases.length === 0) return EMPTY;
+		const current = phases[Math.min(phaseIndex, phases.length - 1)];
 		return {
-			activeNodeIds: EMPTY_SET,
-			activeEdgeIds: EMPTY_SET,
-			selectedNodeIds: EMPTY_SET,
+			activeNodeIds: new Set(current.activeNodeIds),
+			activeEdgeIds: new Set(current.activeEdgeIds),
+			selectedNodeIds: new Set(current.selectedNodeIds),
 		};
-	}
-
-	const current = phases[Math.min(phaseIndex, phases.length - 1)];
-	return {
-		activeNodeIds: new Set(current.activeNodeIds),
-		activeEdgeIds: new Set(current.activeEdgeIds),
-		selectedNodeIds: new Set(current.selectedNodeIds),
-	};
+	}, [phases, phaseIndex]);
 }

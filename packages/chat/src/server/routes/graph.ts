@@ -21,15 +21,13 @@ function getStore(): InstanceType<typeof JsGraphStore> {
 	if (!_store) {
 		_store = JsGraphStore.open(GRAPH_PATH);
 		log.info("Graph store initialized");
-		// Auto-init VCS if not already initialized
 		try {
 			_store.currentBranch();
 		} catch {
 			try {
-				log.debug("VCS auto-init");
 				_store.vcsInit();
 			} catch {
-				// Already initialized or not supported
+				// Already initialized
 			}
 		}
 	}
@@ -43,9 +41,7 @@ function storeHandler(
 ) {
 	return async (c: Context) => {
 		try {
-			const store = getStore();
-			const result = await fn(store, c);
-			return c.json(result);
+			return c.json(await fn(getStore(), c));
 		} catch (e: unknown) {
 			log.error(`Failed to ${label}`, { error: (e as Error).message });
 			return c.json({ error: (e as Error).message }, errorStatus);
@@ -71,14 +67,9 @@ function isDiffNonEmpty(store: InstanceType<typeof JsGraphStore>): boolean {
 
 // GET / — current graph state
 graphRoutes.get("/", (c) => {
-	if (!existsSync(GRAPH_PATH)) {
-		return c.json(EMPTY_GRAPH);
-	}
-
+	if (!existsSync(GRAPH_PATH)) return c.json(EMPTY_GRAPH);
 	try {
-		const raw = readFileSync(GRAPH_PATH, "utf-8");
-		const graph = JSON.parse(raw);
-		return c.json(graph);
+		return c.json(JSON.parse(readFileSync(GRAPH_PATH, "utf-8")));
 	} catch {
 		log.warn("Graph file read failed");
 		return c.json(EMPTY_GRAPH);
@@ -106,8 +97,7 @@ graphRoutes.get(
 graphRoutes.get(
 	"/log",
 	storeHandler("get log", (store, c) => {
-		const limit = Number(c.req.query("limit") ?? 20);
-		return store.log(limit);
+		return store.log(Number(c.req.query("limit") ?? 20));
 	}),
 );
 
@@ -128,9 +118,9 @@ graphRoutes.get(
 graphRoutes.post(
 	"/branches",
 	storeHandler("create branch", async (store, c) => {
-		const body = await c.req.json<{ name: string }>();
-		store.createBranch(body.name);
-		return { ok: true, name: body.name };
+		const { name } = await c.req.json<{ name: string }>();
+		store.createBranch(name);
+		return { ok: true, name };
 	}),
 );
 
@@ -154,18 +144,16 @@ graphRoutes.delete(
 graphRoutes.post(
 	"/merge",
 	storeHandler("merge", async (store, c) => {
-		const body = await c.req.json<{ source: string }>();
-		const hash = store.mergeBranch(body.source);
-		return { ok: true, hash };
+		const { source } = await c.req.json<{ source: string }>();
+		return { ok: true, hash: store.mergeBranch(source) };
 	}),
 );
 
 graphRoutes.post(
 	"/restore",
 	storeHandler("restore", async (store, c) => {
-		const body = await c.req.json<{ hash: string }>();
-		const hash = store.restoreToCommit(body.hash);
-		return { ok: true, hash };
+		const { hash } = await c.req.json<{ hash: string }>();
+		return { ok: true, hash: store.restoreToCommit(hash) };
 	}),
 );
 

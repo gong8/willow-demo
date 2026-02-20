@@ -139,6 +139,18 @@ function parseTextToolCalls(text: string) {
 	return { cleanText, parsedCalls };
 }
 
+function toToolCallPart(tc: ToolCallItem): ContentPart {
+	return {
+		type: "tool-call",
+		toolCallId: tc.toolCallId,
+		toolName: tc.toolName,
+		args: tc.args,
+		argsText: JSON.stringify(tc.args),
+		result: tc.result,
+		isError: tc.isError,
+	};
+}
+
 function buildParts(state: SseState) {
 	const { cleanText, parsedCalls } = parseTextToolCalls(state.textContent);
 	const contentParts: ContentPart[] = [];
@@ -149,33 +161,15 @@ function buildParts(state: SseState) {
 		contentParts.push({ type: "reasoning", text: state.thinkingText });
 
 	for (const tc of state.toolCalls.values()) {
-		if (tc.toolCallId.startsWith("search__")) {
-			searchCalls.push(tc);
-		} else if (tc.toolCallId.startsWith("indexer__")) {
-			indexerCalls.push(tc);
-		} else {
-			contentParts.push({
-				type: "tool-call",
-				toolCallId: tc.toolCallId,
-				toolName: tc.toolName,
-				args: tc.args,
-				argsText: JSON.stringify(tc.args),
-				result: tc.result,
-				isError: tc.isError,
-			});
-		}
+		if (tc.toolCallId.startsWith("search__")) searchCalls.push(tc);
+		else if (tc.toolCallId.startsWith("indexer__")) indexerCalls.push(tc);
+		else contentParts.push(toToolCallPart(tc));
 	}
 
 	for (const pc of parsedCalls) {
-		contentParts.push({
-			type: "tool-call",
-			toolCallId: pc.id,
-			toolName: pc.toolName,
-			args: pc.args,
-			argsText: JSON.stringify(pc.args),
-			result: pc.result,
-			isError: false,
-		});
+		contentParts.push(
+			toToolCallPart({ ...pc, toolCallId: pc.id, isError: false }),
+		);
 	}
 
 	contentParts.push({ type: "text", text: cleanText });
@@ -232,17 +226,16 @@ function handleSseEvent(
 			});
 			return true;
 
-		case "tool_call_args": {
-			const tc = state.toolCalls.get(parsed.toolCallId as string);
-			if (tc) tc.args = parsed.args as Record<string, unknown>;
-			return true;
-		}
-
+		case "tool_call_args":
 		case "tool_result": {
 			const tc = state.toolCalls.get(parsed.toolCallId as string);
 			if (tc) {
-				tc.result = parsed.result as string;
-				tc.isError = parsed.isError as boolean;
+				if (eventType === "tool_call_args")
+					tc.args = parsed.args as Record<string, unknown>;
+				else {
+					tc.result = parsed.result as string;
+					tc.isError = parsed.isError as boolean;
+				}
 			}
 			return true;
 		}
@@ -300,7 +293,7 @@ async function* readSseStream(
 	const ctx = { eventType: "content" };
 
 	try {
-		while (true) {
+		for (;;) {
 			const { done, value } = await reader.read();
 			if (done) break;
 
@@ -313,10 +306,7 @@ async function* readSseStream(
 				if (!line) continue;
 
 				const result = processSseLine(line, state, ctx);
-				if (result === "done") {
-					yield snapshot(state);
-					return;
-				}
+				if (result === "done") return void (yield snapshot(state));
 				if (result === "updated") yield snapshot(state);
 			}
 		}
@@ -340,22 +330,18 @@ function extractLastMessage(message: unknown) {
 		.map((part) => part.text as string)
 		.join("");
 
-	const attachmentIds = new Set<string>();
-	if (Array.isArray(msg?.attachments)) {
-		for (const att of msg.attachments as Array<Record<string, unknown>>) {
-			if (typeof att.id === "string" && att.id) attachmentIds.add(att.id);
-		}
+	const ids = new Set<string>();
+	for (const att of (msg?.attachments as Array<Record<string, unknown>>) ??
+		[]) {
+		if (typeof att.id === "string" && att.id) ids.add(att.id);
 	}
 	for (const part of content) {
-		if (part.type === "image" && typeof part.image === "string") {
-			const match = (part.image as string).match(
-				/\/chat\/attachments\/([^/]+)$/,
-			);
-			if (match) attachmentIds.add(match[1]);
-		}
+		const src = part.type === "image" ? (part.image as string) : null;
+		const match = src?.match(/\/chat\/attachments\/([^/]+)$/);
+		if (match) ids.add(match[1]);
 	}
 
-	return { text, attachmentIds: [...attachmentIds] };
+	return { text, attachmentIds: [...ids] };
 }
 
 function createSseState(): SseState {

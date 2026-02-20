@@ -1,6 +1,12 @@
 type LogLevel = "debug" | "info" | "warn" | "error";
 
-const LEVELS: LogLevel[] = ["debug", "info", "warn", "error"];
+const LEVEL_IDX: Record<LogLevel, number> = {
+	debug: 0,
+	info: 1,
+	warn: 2,
+	error: 3,
+};
+
 const LABELS: Record<LogLevel, string> = {
 	debug: "DEBUG",
 	info: "INFO ",
@@ -9,10 +15,7 @@ const LABELS: Record<LogLevel, string> = {
 };
 
 const envLevel = (process.env.LOG_LEVEL ?? "info").toLowerCase();
-const currentLevel: LogLevel = LEVELS.includes(envLevel as LogLevel)
-	? (envLevel as LogLevel)
-	: "info";
-const currentLevelIdx = LEVELS.indexOf(currentLevel);
+const minLevel = LEVEL_IDX[envLevel as LogLevel] ?? LEVEL_IDX.info;
 
 function formatMessage(
 	level: LogLevel,
@@ -36,7 +39,7 @@ export interface Logger {
 export function createLogger(module: string): Logger {
 	const make =
 		(level: LogLevel) => (message: string, data?: Record<string, unknown>) => {
-			if (LEVELS.indexOf(level) >= currentLevelIdx) {
+			if (LEVEL_IDX[level] >= minLevel) {
 				const out = level === "error" ? console.error : console.log;
 				out(formatMessage(level, module, message, data));
 			}

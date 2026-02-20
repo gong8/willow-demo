@@ -8,6 +8,25 @@ pub struct NodeId(pub String);
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct LinkId(pub String);
 
+/// Generate `as_str()` and `from_str()` for a snake_case enum.
+macro_rules! str_enum {
+    ($T:ident { $($variant:ident => $s:literal),+ $(,)? }) => {
+        impl $T {
+            pub fn as_str(&self) -> &str {
+                match self { $( $T::$variant => $s, )+ }
+            }
+            pub fn from_str(s: &str) -> Option<$T> {
+                match s { $( $s => Some($T::$variant), )+ _ => None }
+            }
+        }
+        impl std::fmt::Display for $T {
+            fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                f.write_str(self.as_str())
+            }
+        }
+    };
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum NodeType {
@@ -20,32 +39,15 @@ pub enum NodeType {
     Detail,
 }
 
-impl NodeType {
-    pub fn as_str(&self) -> &str {
-        match self {
-            NodeType::Root => "root",
-            NodeType::Category => "category",
-            NodeType::Collection => "collection",
-            NodeType::Entity => "entity",
-            NodeType::Attribute => "attribute",
-            NodeType::Event => "event",
-            NodeType::Detail => "detail",
-        }
-    }
-
-    pub fn from_str(s: &str) -> Option<NodeType> {
-        match s {
-            "root" => Some(NodeType::Root),
-            "category" => Some(NodeType::Category),
-            "collection" => Some(NodeType::Collection),
-            "entity" => Some(NodeType::Entity),
-            "attribute" => Some(NodeType::Attribute),
-            "event" => Some(NodeType::Event),
-            "detail" => Some(NodeType::Detail),
-            _ => None,
-        }
-    }
-}
+str_enum!(NodeType {
+    Root => "root",
+    Category => "category",
+    Collection => "collection",
+    Entity => "entity",
+    Attribute => "attribute",
+    Event => "event",
+    Detail => "detail",
+});
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TemporalMetadata {
@@ -83,24 +85,11 @@ pub enum ConfidenceLevel {
     High,
 }
 
-impl ConfidenceLevel {
-    pub fn from_str(s: &str) -> Option<ConfidenceLevel> {
-        match s {
-            "low" => Some(ConfidenceLevel::Low),
-            "medium" => Some(ConfidenceLevel::Medium),
-            "high" => Some(ConfidenceLevel::High),
-            _ => None,
-        }
-    }
-
-    pub fn as_str(&self) -> &str {
-        match self {
-            ConfidenceLevel::Low => "low",
-            ConfidenceLevel::Medium => "medium",
-            ConfidenceLevel::High => "high",
-        }
-    }
-}
+str_enum!(ConfidenceLevel {
+    Low => "low",
+    Medium => "medium",
+    High => "high",
+});
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Link {

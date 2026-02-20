@@ -1,14 +1,9 @@
 import { X } from "lucide-react";
+import { useMemo } from "react";
 import type { ReactNode } from "react";
-import type { WillowGraph, WillowNode } from "../../lib/graph-types.js";
+import type { WillowGraph, WillowNode } from "../../lib/graph-types";
 
-function Section({
-	title,
-	children,
-}: {
-	title: string;
-	children: ReactNode;
-}) {
+function Section({ title, children }: { title: string; children: ReactNode }) {
 	return (
 		<section className="mb-4">
 			<h4 className="mb-1 text-xs font-medium uppercase tracking-wider text-muted-foreground">
@@ -17,6 +12,24 @@ function Section({
 			{children}
 		</section>
 	);
+}
+
+function useNodeRelations(node: WillowNode, graph: WillowGraph) {
+	return useMemo(() => {
+		const parent = node.parent_id ? graph.nodes[node.parent_id] : null;
+		const children = (node.children ?? [])
+			.map((id) => graph.nodes[id])
+			.filter(Boolean);
+		const links = Object.values(graph.links)
+			.filter((l) => l.from_node === node.id || l.to_node === node.id)
+			.map((l) => ({
+				...l,
+				otherContent:
+					graph.nodes[l.from_node === node.id ? l.to_node : l.from_node]
+						?.content ?? (l.from_node === node.id ? l.to_node : l.from_node),
+			}));
+		return { parent, children, links };
+	}, [node, graph]);
 }
 
 export function NodeDetailPanel({
@@ -28,22 +41,14 @@ export function NodeDetailPanel({
 	graph: WillowGraph;
 	onClose: () => void;
 }) {
-	const parent = node.parent_id ? graph.nodes[node.parent_id] : null;
-	const children = (node.children ?? [])
-		.map((id) => graph.nodes[id])
-		.filter(Boolean);
-	const links = Object.values(graph.links).filter(
-		(l) => l.from_node === node.id || l.to_node === node.id,
-	);
+	const { parent, children, links } = useNodeRelations(node, graph);
 
 	return (
 		<div className="flex w-72 shrink-0 flex-col border-l border-border bg-muted/20">
 			<div className="flex items-start justify-between border-b border-border p-3">
-				<div className="min-w-0 flex-1">
-					<span className="inline-block rounded-full bg-accent px-2 py-0.5 text-[10px] font-medium uppercase tracking-wider text-accent-foreground">
-						{node.node_type}
-					</span>
-				</div>
+				<span className="inline-block rounded-full bg-accent px-2 py-0.5 text-[10px] font-medium uppercase tracking-wider text-accent-foreground">
+					{node.node_type}
+				</span>
 				<button
 					type="button"
 					onClick={onClose}
@@ -79,19 +84,14 @@ export function NodeDetailPanel({
 				{links.length > 0 && (
 					<Section title={`Links (${links.length})`}>
 						<ul className="space-y-1">
-							{links.map((link) => {
-								const otherId =
-									link.from_node === node.id ? link.to_node : link.from_node;
-								const otherNode = graph.nodes[otherId];
-								return (
-									<li key={link.id} className="text-sm text-muted-foreground">
-										<span className="font-medium text-foreground">
-											{link.relation}
-										</span>{" "}
-										→ {otherNode?.content ?? otherId}
-									</li>
-								);
-							})}
+							{links.map((link) => (
+								<li key={link.id} className="text-sm text-muted-foreground">
+									<span className="font-medium text-foreground">
+										{link.relation}
+									</span>{" "}
+									→ {link.otherContent}
+								</li>
+							))}
 						</ul>
 					</Section>
 				)}

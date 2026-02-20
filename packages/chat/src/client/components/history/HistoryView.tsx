@@ -1,6 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
 import { History } from "lucide-react";
-import { useCallback, useMemo, useState } from "react";
 import {
 	type BranchInfo,
 	type CommitEntry,
@@ -12,21 +11,12 @@ import {
 import { CommitDetailPanel } from "./CommitDetailPanel";
 import { CommitLog } from "./CommitLog";
 import { CompareView } from "./CompareView";
-import { HistoryToolbar, type SourceFilter } from "./HistoryToolbar";
+import { HistoryToolbar } from "./HistoryToolbar";
 import { LocalChangesPanel } from "./LocalChangesPanel";
 import { useCommitSelection } from "./useCommitSelection";
-
-const ALL_FILTERS = new Set<SourceFilter>([
-	"conversation",
-	"maintenance",
-	"manual",
-]);
+import { useSourceFilters } from "./useSourceFilters";
 
 export function HistoryView() {
-	const [activeFilters, setActiveFilters] = useState(
-		() => new Set(ALL_FILTERS),
-	);
-
 	const { data: commits = [] } = useQuery<CommitEntry[]>({
 		queryKey: ["commit-log"],
 		queryFn: () => fetchCommitLog(50),
@@ -46,10 +36,7 @@ export function HistoryView() {
 	const headHash = status?.headHash ?? null;
 	const hasLocalChanges = status?.hasLocalChanges ?? false;
 
-	const filteredCommits = useMemo(() => {
-		if (activeFilters.size === ALL_FILTERS.size) return commits;
-		return commits.filter((c) => activeFilters.has(c.source as SourceFilter));
-	}, [commits, activeFilters]);
+	const { activeFilters, toggleFilter, filtered } = useSourceFilters(commits);
 
 	const {
 		viewMode,
@@ -62,18 +49,6 @@ export function HistoryView() {
 		exitCompare,
 	} = useCommitSelection(commits);
 
-	const handleToggleFilter = useCallback((filter: SourceFilter) => {
-		setActiveFilters((prev) => {
-			const next = new Set(prev);
-			if (next.has(filter)) {
-				if (next.size > 1) next.delete(filter);
-			} else {
-				next.add(filter);
-			}
-			return next;
-		});
-	}, []);
-
 	const selectedHash = viewMode?.type === "detail" ? viewMode.hash : null;
 	const showActions = selectedHash !== headHash || hasLocalChanges;
 
@@ -82,9 +57,9 @@ export function HistoryView() {
 			<div className="border-b border-border bg-muted/30">
 				<HistoryToolbar
 					branches={branches}
-					commitCount={filteredCommits.length}
+					commitCount={filtered.length}
 					activeFilters={activeFilters}
-					onToggleFilter={handleToggleFilter}
+					onToggleFilter={toggleFilter}
 				/>
 			</div>
 
@@ -96,7 +71,7 @@ export function HistoryView() {
 			) : (
 				<div className="flex flex-1 overflow-hidden">
 					<CommitLog
-						commits={filteredCommits}
+						commits={filtered}
 						selectedHash={selectedHash}
 						headHash={headHash}
 						hasLocalChanges={hasLocalChanges}

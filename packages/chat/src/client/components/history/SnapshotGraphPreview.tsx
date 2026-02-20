@@ -1,9 +1,9 @@
 import { useQuery } from "@tanstack/react-query";
 import { useMemo } from "react";
-import { fetchGraphAtCommit } from "../../lib/api.js";
-import { transformGraphData } from "../../lib/graph-transform.js";
-import type { NodeType, WillowGraph } from "../../lib/graph-types.js";
-import { GraphPreviewShell } from "./GraphPreviewShell.js";
+import { fetchGraphAtCommit } from "../../lib/api";
+import { transformGraphData } from "../../lib/graph-transform";
+import type { NodeType, WillowGraph } from "../../lib/graph-types";
+import { GraphPreviewShell } from "./GraphPreviewShell";
 
 const ALL_TYPES = new Set<NodeType>([
 	"root",

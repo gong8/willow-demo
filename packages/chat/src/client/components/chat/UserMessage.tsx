@@ -4,10 +4,11 @@ import {
 	useAttachmentRuntime,
 	useMessagePartImage,
 } from "@assistant-ui/react";
-import { ClipboardCopy, Pencil } from "lucide-react";
+import { Pencil } from "lucide-react";
 import {
+	CopyAction,
 	EnlargeableImage,
-	MessageActionBar,
+	MessageShell,
 	actionButtonClass,
 	sameComponent,
 } from "./message-utils.js";
@@ -32,26 +33,23 @@ function UserMessageAttachment() {
 
 export function UserMessage() {
 	return (
-		<MessagePrimitive.Root className="group flex justify-end px-4 py-2">
-			<div className="flex flex-col items-end gap-1 max-w-[80%]">
-				<MessagePrimitive.Attachments
-					components={sameComponent(UserMessageAttachment)}
-				/>
-				<div className="rounded-2xl bg-primary px-4 py-2 text-primary-foreground">
-					<MessagePrimitive.Content components={{ Image: UserImagePart }} />
-				</div>
-				<MessageActionBar>
+		<MessageShell
+			align="end"
+			actions={
+				<>
 					<ActionBarPrimitive.Edit className={actionButtonClass}>
 						<Pencil className="h-4 w-4" />
 					</ActionBarPrimitive.Edit>
-					<ActionBarPrimitive.Copy
-						copiedDuration={2000}
-						className={actionButtonClass}
-					>
-						<ClipboardCopy className="h-4 w-4" />
-					</ActionBarPrimitive.Copy>
-				</MessageActionBar>
+					<CopyAction />
+				</>
+			}
+		>
+			<MessagePrimitive.Attachments
+				components={sameComponent(UserMessageAttachment)}
+			/>
+			<div className="rounded-2xl bg-primary px-4 py-2 text-primary-foreground">
+				<MessagePrimitive.Content components={{ Image: UserImagePart }} />
 			</div>
-		</MessagePrimitive.Root>
+		</MessageShell>
 	);
 }

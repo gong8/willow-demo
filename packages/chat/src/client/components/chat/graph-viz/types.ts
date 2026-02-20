@@ -2,7 +2,7 @@ import type {
 	GraphEdge,
 	GraphNode,
 	WillowGraph,
-} from "../../../lib/graph-types.js";
+} from "../../../lib/graph-types";
 
 export interface AnimationPhase {
 	activeNodeIds: string[];

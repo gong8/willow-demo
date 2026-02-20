@@ -1,5 +1,5 @@
 import { GraphCanvas } from "reagraph";
-import type { GraphEdge, GraphNode } from "../../../lib/graph-types.js";
+import type { GraphEdge, GraphNode } from "../../../lib/graph-types";
 
 interface MiniGraphCanvasProps {
 	nodes: GraphNode[];

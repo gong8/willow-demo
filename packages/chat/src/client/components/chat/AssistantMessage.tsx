@@ -4,7 +4,7 @@ import {
 	useMessage,
 } from "@assistant-ui/react";
 import { MarkdownTextPrimitive } from "@assistant-ui/react-markdown";
-import { ClipboardCopy, RefreshCw } from "lucide-react";
+import { RefreshCw } from "lucide-react";
 import remarkGfm from "remark-gfm";
 import type {
 	IndexerResultsPart,
@@ -14,7 +14,11 @@ import { IndexerIndicator } from "./IndexerIndicator.js";
 import { ReasoningDisplay } from "./ReasoningDisplay.js";
 import { SearchIndicator } from "./SearchIndicator.js";
 import { WillowToolCallDisplay } from "./WillowToolCallDisplay.js";
-import { MessageActionBar, actionButtonClass } from "./message-utils.js";
+import {
+	CopyAction,
+	MessageShell,
+	actionButtonClass,
+} from "./message-utils.js";
 
 function MarkdownText() {
 	return <MarkdownTextPrimitive remarkPlugins={[remarkGfm]} />;
@@ -47,33 +51,29 @@ function IndexerResults() {
 
 export function AssistantMessage() {
 	return (
-		<MessagePrimitive.Root className="group flex px-4 py-2">
-			<div className="flex flex-col gap-1 max-w-full">
-				<SearchResults />
-				<div className="prose prose-sm max-w-none rounded-2xl bg-muted px-4 py-2">
-					<MessagePrimitive.Content
-						components={{
-							Text: MarkdownText,
-							Reasoning: ReasoningDisplay,
-							tools: {
-								Fallback: WillowToolCallDisplay,
-							},
-						}}
-					/>
-				</div>
-				<IndexerResults />
-				<MessageActionBar>
-					<ActionBarPrimitive.Copy
-						copiedDuration={2000}
-						className={actionButtonClass}
-					>
-						<ClipboardCopy className="h-4 w-4" />
-					</ActionBarPrimitive.Copy>
+		<MessageShell
+			actions={
+				<>
+					<CopyAction />
 					<ActionBarPrimitive.Reload className={actionButtonClass}>
 						<RefreshCw className="h-4 w-4" />
 					</ActionBarPrimitive.Reload>
-				</MessageActionBar>
+				</>
+			}
+		>
+			<SearchResults />
+			<div className="prose prose-sm max-w-none rounded-2xl bg-muted px-4 py-2">
+				<MessagePrimitive.Content
+					components={{
+						Text: MarkdownText,
+						Reasoning: ReasoningDisplay,
+						tools: {
+							Fallback: WillowToolCallDisplay,
+						},
+					}}
+				/>
 			</div>
-		</MessagePrimitive.Root>
+			<IndexerResults />
+		</MessageShell>
 	);
 }

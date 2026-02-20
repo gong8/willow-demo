@@ -113,12 +113,8 @@ pub fn compute_graph_diff(old: &Graph, new: &Graph) -> ChangeSummary {
         })
         .collect();
 
-    let links_created = diff_keys_only_in(&new.links, &old.links, |lid, link| {
-        LinkChangeSummary::from_link(lid, link)
-    });
-    let links_removed = diff_keys_only_in(&old.links, &new.links, |lid, link| {
-        LinkChangeSummary::from_link(lid, link)
-    });
+    let links_created = diff_keys_only_in(&new.links, &old.links, LinkChangeSummary::from_link);
+    let links_removed = diff_keys_only_in(&old.links, &new.links, LinkChangeSummary::from_link);
     let links_updated: Vec<_> = new.links.iter()
         .filter_map(|(lid, new_link)| {
             let old_link = old.links.get(lid)?;

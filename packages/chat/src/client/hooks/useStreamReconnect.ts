@@ -17,11 +17,9 @@ function applySseEvent(
 ): boolean {
 	switch (eventType) {
 		case "content":
-			if (parsed.content) {
-				state.content += parsed.content as string;
-				return true;
-			}
-			return false;
+			if (!parsed.content) return false;
+			state.content += parsed.content as string;
+			return true;
 		case "tool_call_start":
 			state.toolCalls.set(parsed.toolCallId as string, {
 				toolCallId: parsed.toolCallId as string,
@@ -42,13 +40,69 @@ function applySseEvent(
 			return true;
 		}
 		case "thinking_delta":
-			if (parsed.text) {
-				state.thinkingText += parsed.text as string;
-				return true;
-			}
-			return false;
+			if (!parsed.text) return false;
+			state.thinkingText += parsed.text as string;
+			return true;
 		default:
 			return false;
+	}
+}
+
+function createReconnectState(): ReconnectStream {
+	return { content: "", toolCalls: new Map(), thinkingText: "", done: false };
+}
+
+async function readReconnectStream(
+	reader: ReadableStreamDefaultReader<Uint8Array>,
+	state: ReconnectStream,
+	signal: AbortSignal,
+	onUpdate: (state: ReconnectStream) => void,
+) {
+	const decoder = new TextDecoder();
+	let buffer = "";
+	let currentEventType = "content";
+
+	while (!signal.aborted) {
+		const { done, value } = await reader.read();
+		if (done) break;
+
+		buffer += decoder.decode(value, { stream: true });
+		const lines = buffer.split("\n");
+		buffer = lines.pop() || "";
+
+		let updated = false;
+
+		for (const line of lines) {
+			const trimmed = line.trim();
+			if (!trimmed) continue;
+
+			if (trimmed.startsWith("event: ")) {
+				currentEventType = trimmed.slice(7);
+				continue;
+			}
+
+			if (trimmed.startsWith("data: ")) {
+				const data = trimmed.slice(6);
+				if (data === "[DONE]") {
+					state.done = true;
+					break;
+				}
+				try {
+					if (applySseEvent(state, currentEventType, JSON.parse(data))) {
+						updated = true;
+					}
+				} catch {
+					// skip unparseable
+				}
+				currentEventType = "content";
+			}
+		}
+
+		if (updated && !signal.aborted) {
+			onUpdate({ ...state, toolCalls: new Map(state.toolCalls) });
+		}
+
+		if (state.done) break;
 	}
 }
 
@@ -90,73 +144,19 @@ export function useStreamReconnect(
 				`${BASE_URL}/chat/conversations/${conversationId}/stream-reconnect`,
 				{ method: "POST", signal: abort.signal },
 			);
-
 			if (!response.ok || abort.signal.aborted) return;
 
 			const reader = response.body?.getReader();
 			if (!reader) return;
 
-			const state: ReconnectStream = {
-				content: "",
-				toolCalls: new Map(),
-				thinkingText: "",
-				done: false,
-			};
+			const state = createReconnectState();
 			wasStreamingRef.current = true;
 			setReconnectStream({ ...state });
 
-			const decoder = new TextDecoder();
-			let buffer = "";
-			let currentEventType = "content";
-
-			while (!abort.signal.aborted) {
-				const { done, value } = await reader.read();
-				if (done) break;
-
-				buffer += decoder.decode(value, { stream: true });
-				const lines = buffer.split("\n");
-				buffer = lines.pop() || "";
-
-				let updated = false;
-
-				for (const line of lines) {
-					const trimmed = line.trim();
-					if (!trimmed) continue;
-
-					if (trimmed.startsWith("event: ")) {
-						currentEventType = trimmed.slice(7);
-						continue;
-					}
-
-					if (trimmed.startsWith("data: ")) {
-						const data = trimmed.slice(6);
-						if (data === "[DONE]") {
-							state.done = true;
-							break;
-						}
-
-						try {
-							const parsed = JSON.parse(data);
-							if (applySseEvent(state, currentEventType, parsed)) {
-								updated = true;
-							}
-						} catch {
-							// skip unparseable
-						}
-						currentEventType = "content";
-					}
-				}
-
-				if (updated && !abort.signal.aborted) {
-					setReconnectStream({
-						...state,
-						toolCalls: new Map(state.toolCalls),
-					});
-					scrollIfNearBottom(reconnectViewportRef.current);
-				}
-
-				if (state.done) break;
-			}
+			await readReconnectStream(reader, state, abort.signal, (snapshot) => {
+				setReconnectStream(snapshot);
+				scrollIfNearBottom(reconnectViewportRef.current);
+			});
 
 			if (!abort.signal.aborted) {
 				wasStreamingRef.current = false;

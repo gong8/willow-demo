@@ -13,10 +13,6 @@ pub struct SearchResult {
     pub depth: usize,
 }
 
-fn cmp_score(a: &f64, b: &f64) -> std::cmp::Ordering {
-    a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal)
-}
-
 /// Search the graph by traversing from the root node via BFS.
 /// Only nodes reachable through the tree hierarchy are visited.
 pub fn search_nodes(graph: &Graph, query: &str, max_results: usize) -> Vec<SearchResult> {
@@ -32,10 +28,7 @@ pub fn search_nodes(graph: &Graph, query: &str, max_results: usize) -> Vec<Searc
     queue.push_back((&graph.root_id, 0));
 
     while let Some((node_id, depth)) = queue.pop_front() {
-        let node = match graph.nodes.get(node_id) {
-            Some(n) => n,
-            None => continue,
-        };
+        let Some(node) = graph.nodes.get(node_id) else { continue };
 
         if let Some(result) = score_node(node, &query_lower, &terms, depth) {
             results.push(result);
@@ -46,7 +39,7 @@ pub fn search_nodes(graph: &Graph, query: &str, max_results: usize) -> Vec<Searc
         }
     }
 
-    results.sort_by(|a, b| cmp_score(&b.score, &a.score));
+    results.sort_by(|a, b| b.score.total_cmp(&a.score));
     results.truncate(max_results);
     debug!(query = %query, results = results.len(), "search complete");
     results
@@ -64,12 +57,12 @@ fn score_node(node: &Node, query_lower: &str, terms: &[&str], depth: usize) -> O
         .chain(node.metadata.iter().map(|(k, v)| {
             (score_text(v, query_lower, terms) * 0.5, format!("metadata.{k}"))
         }))
-        .max_by(|a, b| cmp_score(&a.0, &b.0))?;
+        .max_by(|a, b| a.0.total_cmp(&b.0))?;
 
     if best_score > 0.0 {
         Some(SearchResult {
             node_id: node.id.clone(),
-            node_type: node.node_type.as_str().to_string(),
+            node_type: node.node_type.to_string(),
             content: node.content.clone(),
             score: best_score,
             matched_field: best_field,

@@ -77,6 +77,14 @@ impl GraphStore {
             .ok_or_else(|| WillowError::NodeNotFound(node_id.to_string()))
     }
 
+    fn get_link(&self, link_id: &str) -> Result<&Link, WillowError> {
+        let lid = LinkId(link_id.to_string());
+        self.graph
+            .links
+            .get(&lid)
+            .ok_or_else(|| WillowError::LinkNotFound(link_id.to_string()))
+    }
+
     fn links_touching(&self, node_ids: &std::collections::HashSet<&NodeId>) -> Vec<Link> {
         self.graph
             .links
@@ -103,13 +111,19 @@ impl GraphStore {
             .transpose()
     }
 
-    fn collect_descendant_ids(&self, node_id: &NodeId, result: &mut Vec<NodeId>) {
-        if let Some(node) = self.graph.nodes.get(node_id) {
-            for child_id in &node.children {
-                result.push(child_id.clone());
-                self.collect_descendant_ids(child_id, result);
+    /// Collect all descendant node IDs (recursive, depth-first).
+    fn collect_descendant_ids(&self, node_id: &NodeId) -> Vec<NodeId> {
+        let mut result = Vec::new();
+        let mut stack = vec![node_id.clone()];
+        while let Some(current) = stack.pop() {
+            if let Some(node) = self.graph.nodes.get(&current) {
+                for child_id in node.children.iter().rev() {
+                    result.push(child_id.clone());
+                    stack.push(child_id.clone());
+                }
             }
         }
+        result
     }
 
     // ---- VCS methods ----
@@ -319,46 +333,41 @@ impl GraphStore {
     ) -> Result<Node, WillowError> {
         debug!(node_id = %node_id, "update_node");
         let nid = NodeId(node_id.to_string());
+        let node = self.graph.nodes.get_mut(&nid)
+            .ok_or_else(|| WillowError::NodeNotFound(node_id.to_string()))?;
 
-        let (old_content, old_metadata) = {
-            let node = self.get_node(node_id)?;
-            (node.content.clone(), node.metadata.clone())
-        };
-
-        let node = self.graph.nodes.get_mut(&nid).unwrap();
+        let old_content = node.content.clone();
+        let old_metadata = node.metadata.clone();
 
         let content_changed = content.is_some_and(|c| c != node.content);
-        if let Some(new_content) = content {
-            if content_changed {
-                node.previous_values.push(SupersededValue {
-                    old_content: node.content.clone(),
-                    superseded_at: Utc::now(),
-                    reason: reason.map(|s| s.to_string()),
-                });
-                node.content = new_content.to_string();
-            }
+        if content_changed {
+            node.previous_values.push(SupersededValue {
+                old_content: old_content.clone(),
+                superseded_at: Utc::now(),
+                reason: reason.map(|s| s.to_string()),
+            });
+            node.content = content.unwrap().to_string();
         }
 
         let metadata_changed = metadata.as_ref().is_some_and(|m| *m != node.metadata);
         if let Some(new_metadata) = metadata {
             node.metadata = new_metadata;
         }
-
         if let Some(new_temporal) = temporal {
             node.temporal = Some(new_temporal);
         }
 
         node.updated_at = Utc::now();
         let updated = node.clone();
-        self.save()?;
 
+        self.save()?;
         if content_changed || metadata_changed {
             self.record_change(Change::UpdateNode {
                 node_id: nid,
-                old_content: if content_changed { Some(old_content) } else { None },
-                new_content: if content_changed { Some(updated.content.clone()) } else { None },
-                old_metadata: if metadata_changed { Some(old_metadata) } else { None },
-                new_metadata: if metadata_changed { Some(updated.metadata.clone()) } else { None },
+                old_content: content_changed.then_some(old_content),
+                new_content: content_changed.then(|| updated.content.clone()),
+                old_metadata: metadata_changed.then_some(old_metadata),
+                new_metadata: metadata_changed.then(|| updated.metadata.clone()),
             });
         }
 
@@ -371,21 +380,17 @@ impl GraphStore {
         if nid == self.graph.root_id {
             return Err(WillowError::CannotDeleteRoot);
         }
-
         self.get_node(node_id)?;
 
-        let mut to_delete = Vec::new();
-        self.collect_descendant_ids(&nid, &mut to_delete);
+        let mut to_delete = self.collect_descendant_ids(&nid);
         to_delete.push(nid.clone());
         debug!(node_id = %node_id, cascade = to_delete.len(), "delete_node");
 
         let delete_set: std::collections::HashSet<&NodeId> = to_delete.iter().collect();
-        let deleted_nodes: Vec<Node> = to_delete
-            .iter()
-            .filter_map(|id| self.graph.nodes.get(id).cloned())
-            .collect();
+        let deleted_nodes: Vec<Node> = to_delete.iter().filter_map(|id| self.graph.nodes.get(id).cloned()).collect();
         let deleted_links = self.links_touching(&delete_set);
 
+        // Remove from parent's children list
         if let Some(parent_id) = self.graph.nodes.get(&nid).and_then(|n| n.parent_id.clone()) {
             if let Some(parent) = self.graph.nodes.get_mut(&parent_id) {
                 parent.children.retain(|c| c != &nid);
@@ -395,10 +400,9 @@ impl GraphStore {
         for id in &to_delete {
             self.graph.nodes.remove(id);
         }
-
-        self.graph
-            .links
-            .retain(|_, link| !delete_set.contains(&link.from_node) && !delete_set.contains(&link.to_node));
+        self.graph.links.retain(|_, link| {
+            !delete_set.contains(&link.from_node) && !delete_set.contains(&link.to_node)
+        });
 
         self.save_and_record(Change::DeleteNode {
             node_id: nid,
@@ -469,18 +473,10 @@ impl GraphStore {
     ) -> Result<Link, WillowError> {
         debug!(link_id = %link_id, "update_link");
         let lid = LinkId(link_id.to_string());
-
-        let old_link = self
-            .graph
-            .links
-            .get(&lid)
-            .ok_or_else(|| WillowError::LinkNotFound(link_id.to_string()))?
-            .clone();
-
+        let old_link = self.get_link(link_id)?.clone();
         let confidence_level = Self::parse_confidence(confidence)?;
 
         let link = self.graph.links.get_mut(&lid).unwrap();
-
         if let Some(r) = relation {
             link.relation = r.to_string();
         }
@@ -490,7 +486,6 @@ impl GraphStore {
         if let Some(c) = confidence_level {
             link.confidence = Some(c);
         }
-
         let new_link = link.clone();
 
         self.save_and_record(Change::UpdateLink {
@@ -504,13 +499,9 @@ impl GraphStore {
 
     pub fn delete_link(&mut self, link_id: &str) -> Result<Link, WillowError> {
         debug!(link_id = %link_id, "delete_link");
+        self.get_link(link_id)?; // validate existence
         let lid = LinkId(link_id.to_string());
-
-        let link = self
-            .graph
-            .links
-            .remove(&lid)
-            .ok_or_else(|| WillowError::LinkNotFound(link_id.to_string()))?;
+        let link = self.graph.links.remove(&lid).unwrap();
 
         self.save_and_record(Change::RemoveLink {
             link_id: lid,

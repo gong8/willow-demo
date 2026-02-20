@@ -1,17 +1,6 @@
-import { createLogger } from "../../logger.js";
-import { getDisallowedTools } from "../agent-tools.js";
-import {
-	LLM_MODEL,
-	cleanupDir,
-	createInvocationDir,
-	createStreamParser,
-	getCliModel,
-	pipeStdout,
-	spawnCli,
-	writeMcpConfig,
-	writeSystemPrompt,
-} from "../cli-chat.js";
-import type { CrawlerReport, Finding } from "./types.js";
+import { createLogger } from "../../logger";
+import { runCliAgent } from "./cli-agent";
+import type { CrawlerReport, Finding } from "./types";
 
 const log = createLogger("crawler");
 
@@ -171,102 +160,36 @@ export interface SpawnCrawlerOptions {
 	preScanFindings: Finding[];
 }
 
-export function spawnCrawler(
+export async function spawnCrawler(
 	options: SpawnCrawlerOptions,
 	onComplete?: () => void,
 ): Promise<CrawlerReport> {
-	return new Promise((resolve) => {
-		const invocationDir = createInvocationDir();
-		const mcpConfigPath = writeMcpConfig(invocationDir, options.mcpServerPath);
-		const systemPromptPath = writeSystemPrompt(
-			invocationDir,
-			buildCrawlerSystemPrompt(
-				options.subtreeRootId,
-				options.subtreeContent,
-				options.crawlerIndex,
-				options.graphSummary,
-				options.preScanFindings,
-			),
-		);
-
-		const prompt = `Explore the subtree rooted at "${options.subtreeContent}" (ID: ${options.subtreeRootId}) and report all findings.`;
-
-		const args = [
-			"--print",
-			"--output-format",
-			"stream-json",
-			"--verbose",
-			"--include-partial-messages",
-			"--model",
-			getCliModel(LLM_MODEL),
-			"--dangerously-skip-permissions",
-			"--mcp-config",
-			mcpConfigPath,
-			"--strict-mcp-config",
-			"--disallowedTools",
-			...getDisallowedTools("crawler"),
-			"--append-system-prompt-file",
-			systemPromptPath,
-			"--setting-sources",
-			"",
-			"--no-session-persistence",
-			"--max-turns",
-			"10",
-			prompt,
-		];
-
-		let proc: ReturnType<typeof spawnCli>;
-		try {
-			proc = spawnCli(args, invocationDir);
-		} catch {
-			log.error("Crawler spawn failed", {
-				subtreeRootId: options.subtreeRootId,
-			});
-			cleanupDir(invocationDir);
-			resolve(emptyReport(options.subtreeRootId, options.subtreeContent));
-			return;
-		}
-
-		let textOutput = "";
-
-		const emitter = (event: string, data: string) => {
-			if (event !== "content") return;
-			try {
-				const parsed = JSON.parse(data);
-				if (parsed.content) textOutput += parsed.content;
-			} catch {
-				/* ignore non-JSON chunks */
-			}
-		};
-
-		const parser = createStreamParser(emitter);
-		proc.stdin?.end();
-		pipeStdout(proc, parser);
-
-		proc.stderr?.on("data", (chunk: Buffer) => {
-			const text = chunk.toString().trim();
-			if (text) log.debug("crawler stderr", { text: text.slice(0, 500) });
-		});
-
-		const finish = () => {
-			cleanupDir(invocationDir);
-			const report = parseCrawlerReport(
-				textOutput,
-				options.subtreeRootId,
-				options.subtreeContent,
-			);
-			log.info("Crawler complete", {
-				subtreeRootId: options.subtreeRootId,
-				findings: report.findings.length,
-				nodesExplored: report.nodesExplored,
-			});
-			onComplete?.();
-			resolve(report);
-		};
-
-		proc.on("close", finish);
-		proc.on("error", finish);
+	const textOutput = await runCliAgent({
+		systemPrompt: buildCrawlerSystemPrompt(
+			options.subtreeRootId,
+			options.subtreeContent,
+			options.crawlerIndex,
+			options.graphSummary,
+			options.preScanFindings,
+		),
+		userPrompt: `Explore the subtree rooted at "${options.subtreeContent}" (ID: ${options.subtreeRootId}) and report all findings.`,
+		mcpServerPath: options.mcpServerPath,
+		role: "crawler",
+		maxTurns: 10,
 	});
+
+	const report = parseCrawlerReport(
+		textOutput,
+		options.subtreeRootId,
+		options.subtreeContent,
+	);
+	log.info("Crawler complete", {
+		subtreeRootId: options.subtreeRootId,
+		findings: report.findings.length,
+		nodesExplored: report.nodesExplored,
+	});
+	onComplete?.();
+	return report;
 }
 
 export interface CrawlerSubtree {
@@ -287,17 +210,13 @@ export async function spawnCrawlers(options: {
 }): Promise<CrawlerReport[]> {
 	let subtrees = options.subtrees;
 
-	// If too many subtrees, combine the smallest into one crawler
 	if (subtrees.length > MAX_CRAWLERS) {
 		log.info("Combining small subtrees", {
 			total: subtrees.length,
 			max: MAX_CRAWLERS,
 		});
-		// Keep the first (MAX_CRAWLERS - 1) as-is, combine the rest
 		const keep = subtrees.slice(0, MAX_CRAWLERS - 1);
 		const combined = subtrees.slice(MAX_CRAWLERS - 1);
-		// Use the first combined subtree as the "root" for the combined crawler
-		// The crawler will still explore all of them via search
 		keep.push({
 			id: combined[0].id,
 			content: combined.map((s) => s.content).join(", "),
@@ -305,23 +224,22 @@ export async function spawnCrawlers(options: {
 		subtrees = keep;
 	}
 
-	// Partition pre-scan findings by subtree
 	const findingsForSubtree = (subtreeId: string): Finding[] =>
 		options.preScanFindings.filter((f) => f.nodeIds.includes(subtreeId));
 
-	const promises = subtrees.map((subtree, index) =>
-		spawnCrawler(
-			{
-				subtreeRootId: subtree.id,
-				subtreeContent: subtree.content,
-				crawlerIndex: index + 1,
-				mcpServerPath: options.mcpServerPath,
-				graphSummary: options.graphSummary,
-				preScanFindings: findingsForSubtree(subtree.id),
-			},
-			options.onCrawlerComplete,
+	return Promise.all(
+		subtrees.map((subtree, index) =>
+			spawnCrawler(
+				{
+					subtreeRootId: subtree.id,
+					subtreeContent: subtree.content,
+					crawlerIndex: index + 1,
+					mcpServerPath: options.mcpServerPath,
+					graphSummary: options.graphSummary,
+					preScanFindings: findingsForSubtree(subtree.id),
+				},
+				options.onCrawlerComplete,
+			),
 		),
 	);
-
-	return Promise.all(promises);
 }

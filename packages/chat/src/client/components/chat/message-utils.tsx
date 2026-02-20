@@ -1,4 +1,9 @@
-import { ActionBarPrimitive, useMessage } from "@assistant-ui/react";
+import {
+	ActionBarPrimitive,
+	MessagePrimitive,
+	useMessage,
+} from "@assistant-ui/react";
+import { ClipboardCopy } from "lucide-react";
 import type { ReactNode } from "react";
 import { useState } from "react";
 
@@ -16,6 +21,41 @@ export function MessageActionBar({ children }: { children: ReactNode }) {
 				{children}
 			</ActionBarPrimitive.Root>
 		</div>
+	);
+}
+
+export function CopyAction() {
+	return (
+		<ActionBarPrimitive.Copy
+			copiedDuration={2000}
+			className={actionButtonClass}
+		>
+			<ClipboardCopy className="h-4 w-4" />
+		</ActionBarPrimitive.Copy>
+	);
+}
+
+export function MessageShell({
+	align = "start",
+	children,
+	actions,
+}: {
+	align?: "start" | "end";
+	children: ReactNode;
+	actions: ReactNode;
+}) {
+	const isEnd = align === "end";
+	return (
+		<MessagePrimitive.Root
+			className={`group flex px-4 py-2${isEnd ? " justify-end" : ""}`}
+		>
+			<div
+				className={`flex flex-col gap-1${isEnd ? " items-end max-w-[80%]" : " max-w-full"}`}
+			>
+				{children}
+				<MessageActionBar>{actions}</MessageActionBar>
+			</div>
+		</MessagePrimitive.Root>
 	);
 }
 

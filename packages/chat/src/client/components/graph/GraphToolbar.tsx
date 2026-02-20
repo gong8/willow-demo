@@ -1,5 +1,5 @@
 import { LayoutGrid, Search } from "lucide-react";
-import type { GraphStats, LayoutType } from "../../lib/graph-types.js";
+import type { GraphStats, LayoutType } from "../../lib/graph-types";
 
 const LAYOUTS: { value: LayoutType; label: string }[] = [
 	{ value: "forceDirected2d", label: "Force" },
@@ -24,7 +24,6 @@ export function GraphToolbar({
 }) {
 	return (
 		<div className="flex items-center gap-4 px-4 py-2">
-			{/* Search */}
 			<div className="relative flex-1 max-w-xs">
 				<Search className="absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
 				<input
@@ -36,7 +35,6 @@ export function GraphToolbar({
 				/>
 			</div>
 
-			{/* Layout switcher */}
 			<div className="flex items-center gap-1.5">
 				<LayoutGrid className="h-3.5 w-3.5 text-muted-foreground" />
 				<select
@@ -52,7 +50,6 @@ export function GraphToolbar({
 				</select>
 			</div>
 
-			{/* Stats */}
 			<div className="ml-auto flex items-center gap-3 text-xs text-muted-foreground">
 				<span>{stats.nodeCount} nodes</span>
 				<span>{stats.treeEdgeCount} edges</span>

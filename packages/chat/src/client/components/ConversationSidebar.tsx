@@ -23,6 +23,48 @@ const viewTabs: { view: ActiveView; icon: LucideIcon; title: string }[] = [
 	{ view: "resources", icon: FolderOpen, title: "Resources" },
 ];
 
+function ConversationItem({
+	conv,
+	isActive,
+	onSelect,
+	onDelete,
+}: {
+	conv: Conversation;
+	isActive: boolean;
+	onSelect: () => void;
+	onDelete: (e: React.MouseEvent) => void;
+}) {
+	return (
+		<div
+			role="button"
+			tabIndex={0}
+			onClick={onSelect}
+			onKeyDown={(e) => {
+				if (e.key === "Enter" || e.key === " ") {
+					e.preventDefault();
+					onSelect();
+				}
+			}}
+			className={`group flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm transition-colors cursor-pointer ${
+				isActive
+					? "bg-accent text-accent-foreground"
+					: "text-muted-foreground hover:bg-accent/50"
+			}`}
+		>
+			<MessageSquare className="h-3.5 w-3.5 shrink-0" />
+			<span className="flex-1 truncate">{conv.title}</span>
+			<button
+				type="button"
+				onClick={onDelete}
+				className="shrink-0 rounded p-0.5 opacity-0 transition-opacity group-hover:opacity-100 hover:text-destructive"
+				title="Delete"
+			>
+				<Trash2 className="h-3 w-3" />
+			</button>
+		</div>
+	);
+}
+
 export function ConversationSidebar({
 	activeId,
 	onSelect,
@@ -96,34 +138,13 @@ export function ConversationSidebar({
 
 			<div className="flex-1 overflow-y-auto p-2">
 				{conversations.map((conv) => (
-					<div
+					<ConversationItem
 						key={conv.id}
-						role="button"
-						tabIndex={0}
-						onClick={() => handleSelectConversation(conv.id)}
-						onKeyDown={(e) => {
-							if (e.key === "Enter" || e.key === " ") {
-								e.preventDefault();
-								handleSelectConversation(conv.id);
-							}
-						}}
-						className={`group flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm transition-colors cursor-pointer ${
-							activeView === "chat" && activeId === conv.id
-								? "bg-accent text-accent-foreground"
-								: "text-muted-foreground hover:bg-accent/50"
-						}`}
-					>
-						<MessageSquare className="h-3.5 w-3.5 shrink-0" />
-						<span className="flex-1 truncate">{conv.title}</span>
-						<button
-							type="button"
-							onClick={(e) => handleDelete(conv.id, e)}
-							className="shrink-0 rounded p-0.5 opacity-0 transition-opacity group-hover:opacity-100 hover:text-destructive"
-							title="Delete"
-						>
-							<Trash2 className="h-3 w-3" />
-						</button>
-					</div>
+						conv={conv}
+						isActive={activeView === "chat" && activeId === conv.id}
+						onSelect={() => handleSelectConversation(conv.id)}
+						onDelete={(e) => handleDelete(conv.id, e)}
+					/>
 				))}
 
 				{conversations.length === 0 && (

@@ -1,7 +1,7 @@
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { render } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { ChatThread } from "../ChatThread.js";
+import { createQueryWrapper } from "./helpers";
 
 vi.mock("@assistant-ui/react", () => ({
 	ThreadPrimitive: {
@@ -41,12 +41,9 @@ vi.mock("../ReconnectStreamView.js", () => ({
 
 describe("ChatThread", () => {
 	it("renders thread structure", () => {
-		const queryClient = new QueryClient();
-		const { getByTestId } = render(
-			<QueryClientProvider client={queryClient}>
-				<ChatThread conversationId="c1" />
-			</QueryClientProvider>,
-		);
+		const { getByTestId } = render(<ChatThread conversationId="c1" />, {
+			wrapper: createQueryWrapper(),
+		});
 		expect(getByTestId("thread-root")).toBeDefined();
 		expect(getByTestId("viewport")).toBeDefined();
 		expect(getByTestId("messages")).toBeDefined();

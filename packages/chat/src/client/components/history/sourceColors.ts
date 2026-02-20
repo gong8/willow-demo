@@ -1,3 +1,11 @@
+export type SourceFilter = "conversation" | "maintenance" | "manual";
+
+export const SOURCE_FILTERS: { value: SourceFilter; label: string }[] = [
+	{ value: "conversation", label: "Conversation" },
+	{ value: "maintenance", label: "Maintenance" },
+	{ value: "manual", label: "Manual" },
+];
+
 export const SOURCE_COLORS: Record<string, { bg: string; badge: string }> = {
 	conversation: {
 		bg: "bg-blue-500/15 text-blue-400",

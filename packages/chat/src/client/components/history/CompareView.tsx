@@ -5,19 +5,19 @@ import {
 	type ChangeSummary,
 	diffCommits,
 	fetchGraphAtCommit,
-} from "../../lib/api.js";
+} from "../../lib/api";
 import {
 	NODE_COLORS,
 	NODE_SIZES,
 	TREE_EDGE_COLOR,
-} from "../../lib/graph-transform.js";
+} from "../../lib/graph-transform";
 import type {
 	GraphEdge,
 	GraphNode,
 	NodeType,
 	WillowGraph,
-} from "../../lib/graph-types.js";
-import { GraphPreviewShell } from "./GraphPreviewShell.js";
+} from "../../lib/graph-types";
+import { GraphPreviewShell } from "./GraphPreviewShell";
 
 const DIFF_COLORS = {
 	added: "#22c55e",
@@ -26,6 +26,20 @@ const DIFF_COLORS = {
 	unchanged: "#64748b",
 } as const;
 
+function truncateLabel(text: string, max = 40): string {
+	return text.length > max ? `${text.slice(0, max)}...` : text;
+}
+
+function diffColorForNode(
+	id: string,
+	createdIds: Set<string>,
+	updatedIds: Set<string>,
+): string {
+	if (createdIds.has(id)) return DIFF_COLORS.added;
+	if (updatedIds.has(id)) return DIFF_COLORS.modified;
+	return DIFF_COLORS.unchanged;
+}
+
 function buildDiffGraph(
 	graph: WillowGraph,
 	diff: ChangeSummary,
@@ -33,38 +47,18 @@ function buildDiffGraph(
 	const createdIds = new Set(diff.nodesCreated.map((n) => n.nodeId));
 	const updatedIds = new Set(diff.nodesUpdated.map((n) => n.nodeId));
 
-	const nodes: GraphNode[] = [];
-	const edges: GraphEdge[] = [];
-
-	for (const [id, node] of Object.entries(graph.nodes)) {
-		let fill: string;
-		if (createdIds.has(id)) {
-			fill = DIFF_COLORS.added;
-		} else if (updatedIds.has(id)) {
-			fill = DIFF_COLORS.modified;
-		} else {
-			fill = DIFF_COLORS.unchanged;
-		}
-
-		nodes.push({
-			id,
-			label:
-				node.content.length > 40
-					? `${node.content.slice(0, 40)}...`
-					: node.content,
-			fill,
-			size: NODE_SIZES[node.node_type as NodeType] ?? NODE_SIZES.detail,
-		});
-	}
+	const nodes: GraphNode[] = Object.entries(graph.nodes).map(([id, node]) => ({
+		id,
+		label: truncateLabel(node.content),
+		fill: diffColorForNode(id, createdIds, updatedIds),
+		size: NODE_SIZES[node.node_type as NodeType] ?? NODE_SIZES.detail,
+	}));
 
 	for (const deleted of diff.nodesDeleted) {
 		if (!graph.nodes[deleted.nodeId]) {
 			nodes.push({
 				id: deleted.nodeId,
-				label:
-					deleted.content.length > 40
-						? `${deleted.content.slice(0, 40)}...`
-						: deleted.content,
+				label: truncateLabel(deleted.content),
 				fill: DIFF_COLORS.deleted,
 				size: NODE_SIZES[deleted.nodeType as NodeType] ?? NODE_SIZES.detail,
 			});
@@ -73,6 +67,7 @@ function buildDiffGraph(
 
 	const nodeIdSet = new Set(nodes.map((n) => n.id));
 
+	const edges: GraphEdge[] = [];
 	for (const [id, node] of Object.entries(graph.nodes)) {
 		if (node.parent_id && nodeIdSet.has(node.parent_id)) {
 			edges.push({

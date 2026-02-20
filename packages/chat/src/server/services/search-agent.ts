@@ -1,5 +1,5 @@
-import { runAgent } from "./agent-runner.js";
-import type { SSEEmitter, ToolCallData } from "./cli-chat.js";
+import { runAgent } from "./agent-runner";
+import type { SSEEmitter, ToolCallData } from "./cli-chat";
 
 const SEARCH_SYSTEM_PROMPT = `You are a memory search agent. Your job is to navigate a knowledge tree to find information relevant to the user's message.
 

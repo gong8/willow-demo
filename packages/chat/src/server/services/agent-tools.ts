@@ -42,16 +42,10 @@ type AgentName =
 	| "crawler"
 	| "resolver";
 
-const FULL_WRITE_TOOLS: readonly string[] = [
-	"mcp__willow__search_nodes",
-	"mcp__willow__get_context",
-	"mcp__willow__create_node",
-	"mcp__willow__update_node",
-	"mcp__willow__delete_node",
-	"mcp__willow__add_link",
-	"mcp__willow__update_link",
-	"mcp__willow__delete_link",
-];
+/** All willow tools except walk_graph — used by maintenance/resolver agents. */
+const FULL_WRITE_TOOLS = ALL_WILLOW_TOOLS.filter(
+	(t) => t !== "mcp__willow__walk_graph",
+);
 
 const AGENT_ALLOWED_TOOLS: Record<AgentName, readonly string[]> = {
 	chat: [],

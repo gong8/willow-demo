@@ -12,16 +12,12 @@ export function useMaintenanceStatus() {
 	const { data: status } = useQuery<MaintenanceStatus>({
 		queryKey: ["maintenance-status"],
 		queryFn: fetchMaintenanceStatus,
-		refetchInterval: (query) => {
-			const data = query.state.data;
-			// Poll faster when a job is running
-			return data?.currentJob?.status === "running" ? 2000 : 15000;
-		},
+		refetchInterval: (query) =>
+			query.state.data?.currentJob?.status === "running" ? 2000 : 15000,
 	});
 
 	const trigger = useCallback(async () => {
 		await triggerMaintenance();
-		// Immediately refetch status
 		queryClient.invalidateQueries({ queryKey: ["maintenance-status"] });
 	}, [queryClient]);
 

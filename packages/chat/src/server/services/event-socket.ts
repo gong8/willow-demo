@@ -3,9 +3,9 @@ import { unlinkSync } from "node:fs";
 import { type Server, createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { createLogger } from "../logger.js";
-import type { SSEEmitter } from "./cli-chat.js";
-import { LineBuffer } from "./line-buffer.js";
+import { createLogger } from "../logger";
+import type { SSEEmitter } from "./cli-chat";
+import { LineBuffer } from "./line-buffer";
 
 const log = createLogger("event-socket");
 

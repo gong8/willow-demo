@@ -1,9 +1,9 @@
 import { Check, ChevronLeft, ChevronRight } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
-import type { IndexerResultsPart } from "../../lib/chat-adapter.js";
-import { StatusIndicator } from "./StatusIndicator.js";
-import { getToolLabel } from "./ToolCallDisplay.js";
-import { WillowToolViz } from "./graph-viz/WillowToolViz.js";
+import type { IndexerResultsPart } from "../../lib/chat-adapter";
+import { StatusIndicator } from "./StatusIndicator";
+import { getToolLabel } from "./ToolCallDisplay";
+import { WillowToolViz } from "./graph-viz/WillowToolViz";
 
 const SEARCH_TOOLS = new Set([
 	"mcp__willow__search_nodes",

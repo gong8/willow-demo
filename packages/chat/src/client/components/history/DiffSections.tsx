@@ -1,5 +1,5 @@
 import { ArrowRight } from "lucide-react";
-import type { LinkChangeSummary, NodeChangeSummary } from "../../lib/api.js";
+import type { LinkChangeSummary, NodeChangeSummary } from "../../lib/api";
 
 export function ChangeSection({
 	title,
@@ -98,7 +98,10 @@ export function LinkSection({
 	);
 }
 
-export function DiffSectionList({ diff }: { diff: ChangeSummaryLike }) {
+export function DiffSectionList({
+	diff,
+	emptyMessage,
+}: { diff: ChangeSummaryLike; emptyMessage?: string }) {
 	const hasChanges =
 		diff.nodesCreated.length > 0 ||
 		diff.nodesUpdated.length > 0 ||
@@ -106,7 +109,11 @@ export function DiffSectionList({ diff }: { diff: ChangeSummaryLike }) {
 		diff.linksCreated.length > 0 ||
 		diff.linksRemoved.length > 0;
 
-	if (!hasChanges) return null;
+	if (!hasChanges) {
+		return emptyMessage ? (
+			<p className="text-sm text-muted-foreground">{emptyMessage}</p>
+		) : null;
+	}
 
 	return (
 		<div>
