@@ -74,7 +74,9 @@ function getDraftKey(conversationId: string) {
 	return `chat-draft::${conversationId}`;
 }
 
-export function DraftPersistence({ conversationId }: { conversationId: string }) {
+export function DraftPersistence({
+	conversationId,
+}: { conversationId: string }) {
 	const composerRuntime = useComposerRuntime();
 	const draftKey = getDraftKey(conversationId);
 	const restoredRef = useRef(false);

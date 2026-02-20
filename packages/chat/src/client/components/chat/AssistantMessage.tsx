@@ -40,7 +40,12 @@ function SearchResults() {
 			null,
 	);
 	if (!searchPart) return null;
-	return <SearchIndicator toolCalls={searchPart.toolCalls} />;
+	return (
+		<SearchIndicator
+			toolCalls={searchPart.toolCalls}
+			searchStatus={searchPart.searchStatus}
+		/>
+	);
 }
 
 function IndexerResults() {

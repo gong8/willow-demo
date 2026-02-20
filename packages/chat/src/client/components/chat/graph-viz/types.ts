@@ -12,3 +12,11 @@ export interface SubgraphData {
 	phases: AnimationPhase[];
 	focusNodeIds: string[];
 }
+
+export interface SearchLayer {
+	toolCallId: string;
+	toolName: string;
+	nodeIds: Set<string>;
+	focusNodeIds: string[];
+	status: "pending" | "animating" | "settled";
+}

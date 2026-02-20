@@ -18,7 +18,7 @@ const MAX_NODES = 30;
 
 // ---------- Helpers ----------
 
-function buildGraphNode(node: WillowNode): GraphNode {
+export function buildGraphNode(node: WillowNode): GraphNode {
 	return {
 		id: node.id,
 		label:
@@ -30,7 +30,7 @@ function buildGraphNode(node: WillowNode): GraphNode {
 	};
 }
 
-function buildTreeEdge(parentId: string, childId: string): GraphEdge {
+export function buildTreeEdge(parentId: string, childId: string): GraphEdge {
 	return {
 		id: `tree__${parentId}__${childId}`,
 		source: parentId,
@@ -40,7 +40,7 @@ function buildTreeEdge(parentId: string, childId: string): GraphEdge {
 	};
 }
 
-function getAncestors(graph: WillowGraph, nodeId: string): WillowNode[] {
+export function getAncestors(graph: WillowGraph, nodeId: string): WillowNode[] {
 	const ancestors: WillowNode[] = [];
 	let current = graph.nodes[nodeId];
 	while (current?.parent_id) {
@@ -71,7 +71,7 @@ function collectNeighborhood(
 	return { target, parent, siblings };
 }
 
-function buildSubgraphFromNodes(
+export function buildSubgraphFromNodes(
 	graph: WillowGraph,
 	nodeIds: Set<string>,
 ): { nodes: GraphNode[]; edges: GraphEdge[] } {
@@ -113,7 +113,7 @@ function buildSubgraphFromNodes(
 /**
  * BFS-collect nodes from root up to `limit`, returning them in BFS order.
  */
-function bfsCollect(
+export function bfsCollect(
 	graph: WillowGraph,
 	limit: number,
 ): { collected: Set<string>; layers: string[][] } {
@@ -204,7 +204,7 @@ function extractSearchNodes(
 				matchedIds = parsed
 					.map(
 						(r: Record<string, unknown>) =>
-							(r.node_id as string) ?? (r.id as string),
+							(r.nodeId as string) ?? (r.node_id as string) ?? (r.id as string),
 					)
 					.filter(Boolean);
 			}

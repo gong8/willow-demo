@@ -1,35 +1,25 @@
 import { ChevronDown, ChevronRight, Loader2, Search } from "lucide-react";
 import { useState } from "react";
-import { WillowToolViz } from "./graph-viz/WillowToolViz.js";
+import { SearchGraphViz } from "./graph-viz/SearchGraphViz.js";
 
 interface SearchToolCall {
 	toolCallId: string;
 	toolName: string;
 	args: Record<string, unknown>;
-	result?: unknown;
+	result?: string;
 	isError?: boolean;
-}
-
-function SearchToolCallViz({ tc }: { tc: SearchToolCall }) {
-	return (
-		<WillowToolViz
-			toolName={tc.toolName}
-			args={tc.args}
-			result={tc.result}
-			isError={tc.isError}
-		/>
-	);
 }
 
 export function SearchIndicator({
 	toolCalls,
+	searchStatus,
 }: {
 	toolCalls: SearchToolCall[];
+	searchStatus: "searching" | "done";
 }) {
 	const [collapsed, setCollapsed] = useState(false);
 
-	// Search is still in progress if any tool call is pending (no result yet)
-	const isSearching = toolCalls.some((tc) => tc.result === undefined);
+	const isSearching = searchStatus !== "done";
 
 	return (
 		<div
@@ -57,10 +47,8 @@ export function SearchIndicator({
 				)}
 			</button>
 			{!collapsed && toolCalls.length > 0 && (
-				<div className="border-t border-border px-3 py-2 space-y-1">
-					{toolCalls.map((tc) => (
-						<SearchToolCallViz key={tc.toolCallId} tc={tc} />
-					))}
+				<div className="border-t border-border px-3 py-2">
+					<SearchGraphViz toolCalls={toolCalls} />
 				</div>
 			)}
 		</div>

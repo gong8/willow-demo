@@ -1,12 +1,24 @@
-import { describe, it, expect, vi } from "vitest";
 import { render, screen } from "@testing-library/react";
+import { describe, expect, it, vi } from "vitest";
 import { AssistantMessage } from "../AssistantMessage.js";
 
-vi.mock("../ToolCallDisplay.js", () => ({ ToolCallDisplay: () => <div data-testid="tool-display" /> }));
-vi.mock("../WillowToolCallDisplay.js", () => ({ WillowToolCallDisplay: () => <div data-testid="willow-tool-display" /> }));
-vi.mock("../SearchIndicator.js", () => ({ SearchIndicator: () => <div data-testid="search-ind" /> }));
-vi.mock("../IndexerIndicator.js", () => ({ IndexerIndicator: () => <div data-testid="indexer-ind" /> }));
-vi.mock("../ReasoningDisplay.js", () => ({ ReasoningDisplay: ({ text }: any) => <div data-testid="reasoning">{text}</div> }));
+vi.mock("../ToolCallDisplay.js", () => ({
+	ToolCallDisplay: () => <div data-testid="tool-display" />,
+}));
+vi.mock("../WillowToolCallDisplay.js", () => ({
+	WillowToolCallDisplay: () => <div data-testid="willow-tool-display" />,
+}));
+vi.mock("../SearchIndicator.js", () => ({
+	SearchIndicator: () => <div data-testid="search-ind" />,
+}));
+vi.mock("../IndexerIndicator.js", () => ({
+	IndexerIndicator: () => <div data-testid="indexer-ind" />,
+}));
+vi.mock("../ReasoningDisplay.js", () => ({
+	ReasoningDisplay: ({ text }: any) => (
+		<div data-testid="reasoning">{text}</div>
+	),
+}));
 
 vi.mock("@assistant-ui/react", () => ({
 	MessagePrimitive: {

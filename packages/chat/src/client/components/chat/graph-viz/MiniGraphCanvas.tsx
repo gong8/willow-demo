@@ -5,15 +5,22 @@ interface MiniGraphCanvasProps {
 	nodes: GraphNode[];
 	edges: GraphEdge[];
 	selections: string[];
+	height?: number;
+	actives?: string[];
 }
 
 export function MiniGraphCanvas({
 	nodes,
 	edges,
 	selections,
+	height = 200,
+	actives = [],
 }: MiniGraphCanvasProps) {
 	return (
-		<div className="not-prose relative h-[200px] w-full rounded-lg border border-border bg-muted/30 overflow-hidden">
+		<div
+			className="not-prose relative w-full rounded-lg border border-border bg-muted/30 overflow-hidden"
+			style={{ height }}
+		>
 			<GraphCanvas
 				nodes={nodes}
 				edges={edges}
@@ -22,7 +29,7 @@ export function MiniGraphCanvas({
 				labelType="all"
 				draggable={false}
 				selections={selections}
-				actives={[]}
+				actives={actives}
 			/>
 		</div>
 	);

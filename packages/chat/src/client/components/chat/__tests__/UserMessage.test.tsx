@@ -1,5 +1,5 @@
-import { describe, it, expect, vi } from "vitest";
 import { render, screen } from "@testing-library/react";
+import { describe, expect, it, vi } from "vitest";
 import { UserMessage } from "../UserMessage.js";
 
 vi.mock("@assistant-ui/react", () => ({
@@ -17,7 +17,9 @@ vi.mock("@assistant-ui/react", () => ({
 		const msg = { createdAt: new Date() };
 		return typeof selector === "function" ? selector(msg) : msg;
 	},
-	useAttachmentRuntime: () => ({ getState: () => ({ type: "image", id: "1", name: "foo.jpg" }) }),
+	useAttachmentRuntime: () => ({
+		getState: () => ({ type: "image", id: "1", name: "foo.jpg" }),
+	}),
 	useMessagePartImage: () => ({ image: "/foo.jpg" }),
 }));
 

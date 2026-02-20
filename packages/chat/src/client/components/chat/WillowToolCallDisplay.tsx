@@ -41,7 +41,10 @@ function SearchToolCallHandler(props: ToolCallMessagePartProps) {
 
 		// Check metadata for search results
 		if (metaSearchPart) {
-			return { isFirst: first === props.toolCallId, searchPart: metaSearchPart };
+			return {
+				isFirst: first === props.toolCallId,
+				searchPart: metaSearchPart,
+			};
 		}
 
 		// Fallback: build from individual tool calls
@@ -73,7 +76,12 @@ function SearchToolCallHandler(props: ToolCallMessagePartProps) {
 
 	if (!isFirst || !searchPart) return null;
 
-	return <SearchIndicator toolCalls={searchPart.toolCalls} />;
+	return (
+		<SearchIndicator
+			toolCalls={searchPart.toolCalls}
+			searchStatus={searchPart.searchStatus}
+		/>
+	);
 }
 
 /**
@@ -97,7 +105,10 @@ function IndexerToolCallHandler(props: ToolCallMessagePartProps) {
 
 		// Check metadata for indexer results
 		if (metaIndexerPart) {
-			return { isFirst: first === props.toolCallId, indexerPart: metaIndexerPart };
+			return {
+				isFirst: first === props.toolCallId,
+				indexerPart: metaIndexerPart,
+			};
 		}
 
 		// Fallback: build from individual tool calls
@@ -132,6 +143,10 @@ function IndexerToolCallHandler(props: ToolCallMessagePartProps) {
 	return <IndexerIndicator part={indexerPart} />;
 }
 
+function isCoordinatorSearchTool(toolName: string): boolean {
+	return toolName === "mcp__coordinator__search_memories";
+}
+
 export function WillowToolCallDisplay(props: ToolCallMessagePartProps) {
 	// Search-phase tool calls are grouped into a SearchIndicator
 	if (isSearchToolCall(props.toolCallId)) {
@@ -141,6 +156,11 @@ export function WillowToolCallDisplay(props: ToolCallMessagePartProps) {
 	// Indexer-phase tool calls are grouped into an IndexerIndicator
 	if (isIndexerToolCall(props.toolCallId)) {
 		return <IndexerToolCallHandler {...props} />;
+	}
+
+	// Hide the coordinator's search_memories tool — already visualized in SearchIndicator
+	if (isCoordinatorSearchTool(props.toolName)) {
+		return null;
 	}
 
 	const isWillow = props.toolName.startsWith("mcp__willow__");
