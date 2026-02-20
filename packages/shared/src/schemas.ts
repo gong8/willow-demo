@@ -12,7 +12,9 @@ const createNodeSchema = z.object({
 	parentId: z.string().describe("ID of the parent node"),
 	nodeType: z
 		.enum(["category", "collection", "entity", "attribute", "event", "detail"])
-		.describe("Node type: 'category' for top-level grouping, 'collection' for sub-groups, 'entity' for named things, 'attribute' for facts/properties, 'event' for time-bound occurrences, 'detail' for additional depth/elaboration on any node"),
+		.describe(
+			"Node type: 'category' for top-level grouping, 'collection' for sub-groups, 'entity' for named things, 'attribute' for facts/properties, 'event' for time-bound occurrences, 'detail' for additional depth/elaboration on any node",
+		),
 	content: z.string().describe("The content/fact to store"),
 	metadata: z
 		.record(z.string())
@@ -82,6 +84,20 @@ const deleteNodeSchema = z.object({
 		.describe("ID of the node to delete (cascades to all descendants)"),
 });
 
+const walkGraphSchema = z.object({
+	action: z
+		.enum(["start", "down", "up", "done"])
+		.describe(
+			"Navigation action: 'start' begins at root, 'down' enters a child, 'up' backtracks to parent, 'done' ends the search",
+		),
+	nodeId: z
+		.string()
+		.optional()
+		.describe(
+			"Target child node ID for 'down', or current node ID for 'up'. Not needed for 'start' or 'done'.",
+		),
+});
+
 export const schemas = {
 	createNode: createNodeSchema,
 	updateNode: updateNodeSchema,
@@ -89,6 +105,7 @@ export const schemas = {
 	searchNodes: searchNodesSchema,
 	getContext: getContextSchema,
 	deleteNode: deleteNodeSchema,
+	walkGraph: walkGraphSchema,
 };
 
 export type CreateNodeInput = z.infer<typeof createNodeSchema>;
@@ -97,3 +114,4 @@ export type AddLinkInput = z.infer<typeof addLinkSchema>;
 export type SearchNodesInput = z.infer<typeof searchNodesSchema>;
 export type GetContextInput = z.infer<typeof getContextSchema>;
 export type DeleteNodeInput = z.infer<typeof deleteNodeSchema>;
+export type WalkGraphInput = z.infer<typeof walkGraphSchema>;

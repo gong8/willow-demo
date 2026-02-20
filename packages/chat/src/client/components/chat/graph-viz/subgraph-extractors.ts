@@ -618,6 +618,64 @@ function extractAddLink(
 	return { nodes, edges, phases, focusNodeIds: [sourceId, targetId] };
 }
 
+function extractWalkGraph(
+	graph: WillowGraph,
+	_args: Record<string, unknown>,
+	result: unknown,
+): SubgraphData | null {
+	if (!result) return null;
+
+	let parsed: {
+		position?: { id: string };
+		path?: { id: string }[];
+		children?: { id: string }[];
+	};
+	try {
+		parsed = typeof result === "string" ? JSON.parse(result) : result;
+	} catch {
+		return null;
+	}
+
+	if (!parsed.position?.id) return null;
+
+	const positionId = parsed.position.id;
+	const pathIds = (parsed.path ?? []).map((n) => n.id);
+	const childIds = (parsed.children ?? []).map((n) => n.id);
+
+	const collected = new Set<string>();
+	for (const id of pathIds) {
+		if (graph.nodes[id]) collected.add(id);
+	}
+	collected.add(positionId);
+	for (const id of childIds) {
+		if (graph.nodes[id]) collected.add(id);
+	}
+
+	if (collected.size < 2) return null;
+
+	const { nodes, edges } = buildSubgraphFromNodes(graph, collected);
+
+	// Phase 1: position only
+	// Phase 2: position + children
+	const allIds = [...collected];
+	const allEdgeIds = edges.map((e) => e.id);
+
+	const phases: AnimationPhase[] = [
+		{
+			activeNodeIds: [positionId],
+			activeEdgeIds: [],
+			selectedNodeIds: [positionId],
+		},
+		{
+			activeNodeIds: allIds,
+			activeEdgeIds: allEdgeIds,
+			selectedNodeIds: [positionId],
+		},
+	];
+
+	return { nodes, edges, phases, focusNodeIds: [positionId] };
+}
+
 // ---------- Dispatcher ----------
 
 const TOOL_PREFIX = "mcp__willow__";
@@ -645,6 +703,8 @@ export function extractSubgraph(
 			return extractDeleteNode(graph, args);
 		case "add_link":
 			return extractAddLink(graph, args);
+		case "walk_graph":
+			return extractWalkGraph(graph, args, result);
 		default:
 			return null;
 	}

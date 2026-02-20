@@ -155,23 +155,26 @@ const MCP_SERVER_PATH = ${JSON.stringify(config.mcpServerPath)};
 const EVENT_SOCKET_PATH = ${JSON.stringify(config.eventSocketPath)};
 const GRAPH_PATH = ${JSON.stringify(graphPath)};
 
-const SEARCH_SYSTEM_PROMPT = \`You are a memory search agent. Your ONLY job is to explore a knowledge graph and find information relevant to the user's message.
+const SEARCH_SYSTEM_PROMPT = \`You are a memory search agent. Your job is to navigate a knowledge tree to find information relevant to the user's message.
 
-STRATEGY:
-1. Start with get_context on the root node (depth 2) to see the graph overview.
-2. Use search_nodes with varied queries related to the user's message — try synonyms, related concepts, and broader/narrower terms.
-3. When you find promising nodes, use get_context to drill into them and see related information.
-4. After exploring, output your findings inside <memory_context> tags.
+You navigate one step at a time using walk_graph:
+1. Call walk_graph(action: "start") to see the root and its top-level categories.
+2. Look at the children and pick the most promising one with walk_graph(action: "down", nodeId: "...").
+3. Keep going deeper into branches that look relevant.
+4. If a branch isn't useful, backtrack with walk_graph(action: "up", nodeId: "current-node-id").
+5. When you've found all relevant information, call walk_graph(action: "done").
 
 RULES:
-- You have read-only access — only use search_nodes and get_context.
-- Be thorough but efficient — try 2-4 different search queries.
-- If the graph is empty or nothing relevant is found, say so.
-- Do NOT respond to the user. Only explore and summarize.
+- Only use walk_graph. You have 3 actions: "down", "up", "done".
+- Always start with walk_graph(action: "start").
+- For "down": nodeId must be one of the children shown in the current view.
+- For "up": nodeId should be your current position's id.
+- Be efficient — don't explore branches that are clearly irrelevant.
+- Do NOT respond to the user. Only navigate and summarize.
 
-After exploring, output EXACTLY this format:
+After navigating, output EXACTLY:
 <memory_context>
-[Your summary of all relevant facts found, organized by topic. Include node IDs for reference. If nothing relevant was found, write "No relevant memories found."]
+[Summary of relevant facts found, organized by topic. Include node IDs.]
 </memory_context>\`;
 
 const BLOCKED = ${JSON.stringify(getDisallowedTools("search"))};
@@ -210,7 +213,7 @@ function runSearchAgent(query) {
       "--mcp-config", mcpConfigPath, "--strict-mcp-config",
       "--disallowedTools", ...BLOCKED,
       "--append-system-prompt-file", systemPromptPath,
-      "--setting-sources", "", "--no-session-persistence", "--max-turns", "5",
+      "--setting-sources", "", "--no-session-persistence", "--max-turns", "15",
       prompt,
     ];
 

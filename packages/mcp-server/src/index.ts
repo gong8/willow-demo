@@ -88,6 +88,101 @@ server.tool(
 	},
 );
 
+// walk_graph
+server.tool(
+	"walk_graph",
+	"Navigate the knowledge tree one step at a time. Use 'start' to begin at root, 'down' to enter a child, 'up' to backtrack to parent, 'done' to end. Returns the current position, path from root, and children.",
+	schemas.walkGraph.shape,
+	async ({ action, nodeId }) => {
+		const formatView = (targetId: string) => {
+			const ctx = store.getContext(targetId, 1);
+			const position = {
+				id: ctx.node.id,
+				content: ctx.node.content,
+				type: ctx.node.nodeType,
+			};
+
+			const path = [
+				...ctx.ancestors.reverse().map((n) => ({
+					id: n.id,
+					content: n.content,
+					type: n.nodeType,
+				})),
+				position,
+			];
+
+			const children = ctx.descendants
+				.filter((n) => n.parentId === targetId)
+				.map((n) => ({
+					id: n.id,
+					content: n.content,
+					type: n.nodeType,
+					childCount: n.children.length,
+				}));
+
+			return JSON.stringify({ position, path, children }, null, 2);
+		};
+
+		if (action === "start") {
+			return {
+				content: [{ type: "text", text: formatView("root") }],
+			};
+		}
+
+		if (action === "done") {
+			return {
+				content: [{ type: "text", text: "Search complete." }],
+			};
+		}
+
+		if (action === "down") {
+			if (!nodeId) {
+				return {
+					content: [
+						{
+							type: "text",
+							text: "Error: nodeId is required for 'down' action.",
+						},
+					],
+					isError: true,
+				};
+			}
+			return {
+				content: [{ type: "text", text: formatView(nodeId) }],
+			};
+		}
+
+		if (action === "up") {
+			if (!nodeId) {
+				return {
+					content: [
+						{
+							type: "text",
+							text: "Error: nodeId is required for 'up' action.",
+						},
+					],
+					isError: true,
+				};
+			}
+			const ctx = store.getContext(nodeId, 0);
+			const parentId = ctx.node.parentId;
+			if (!parentId) {
+				return {
+					content: [{ type: "text", text: "Already at root, cannot go up." }],
+				};
+			}
+			return {
+				content: [{ type: "text", text: formatView(parentId) }],
+			};
+		}
+
+		return {
+			content: [{ type: "text", text: `Unknown action: ${action}` }],
+			isError: true,
+		};
+	},
+);
+
 // add_link
 server.tool(
 	"add_link",
