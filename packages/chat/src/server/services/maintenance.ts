@@ -3,8 +3,8 @@ import { homedir } from "node:os";
 import { resolve } from "node:path";
 import { JsGraphStore } from "@willow/core";
 import { createLogger } from "../logger.js";
-import { runEnrichment } from "./enrichment/enricher.js";
 import type { ToolCallData } from "./cli-chat.js";
+import { runEnrichment } from "./enrichment/enricher.js";
 
 const log = createLogger("maintenance");
 

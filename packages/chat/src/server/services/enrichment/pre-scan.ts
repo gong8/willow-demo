@@ -59,8 +59,11 @@ function checkOrphansAndParents(graph: RawGraph): Finding[] {
 	const queue = [graph.root_id];
 
 	// BFS from root via children arrays
-	while (queue.length > 0) {
-		const nodeId = queue.shift()!;
+	for (
+		let nodeId = queue.shift();
+		nodeId !== undefined;
+		nodeId = queue.shift()
+	) {
 		if (visited.has(nodeId)) continue;
 		visited.add(nodeId);
 

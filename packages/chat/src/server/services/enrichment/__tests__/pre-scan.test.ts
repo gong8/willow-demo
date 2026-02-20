@@ -2,10 +2,7 @@ import { describe, expect, it } from "vitest";
 import { runPreScan } from "../pre-scan.js";
 import type { RawGraph, RawLink, RawNode } from "../types.js";
 
-function makeNode(
-	id: string,
-	overrides?: Partial<RawNode>,
-): RawNode {
+function makeNode(id: string, overrides?: Partial<RawNode>): RawNode {
 	return {
 		id,
 		node_type: "detail",
@@ -185,9 +182,7 @@ describe("pre-scan", () => {
 				}),
 			});
 			const findings = runPreScan(graph);
-			const expired = findings.filter(
-				(f) => f.category === "expired_temporal",
-			);
+			const expired = findings.filter((f) => f.category === "expired_temporal");
 			expect(expired).toHaveLength(1);
 			expect(expired[0].nodeIds).toContain("a");
 		});
@@ -209,9 +204,7 @@ describe("pre-scan", () => {
 				}),
 			});
 			const findings = runPreScan(graph);
-			const expired = findings.filter(
-				(f) => f.category === "expired_temporal",
-			);
+			const expired = findings.filter((f) => f.category === "expired_temporal");
 			expect(expired).toHaveLength(0);
 		});
 	});

@@ -85,9 +85,7 @@ const deleteNodeSchema = z.object({
 });
 
 const deleteLinkSchema = z.object({
-	linkId: z
-		.string()
-		.describe("ID of the link to delete"),
+	linkId: z.string().describe("ID of the link to delete"),
 });
 
 const walkGraphSchema = z.object({

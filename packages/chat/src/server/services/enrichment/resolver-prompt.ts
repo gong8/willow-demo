@@ -50,24 +50,16 @@ export function buildResolverUserPrompt(
 
 	// Group findings by action type
 	const critical = [
-		...preScanFindings.filter(
-			(f) => f.severity === "critical",
-		),
-		...allCrawlerFindings.filter(
-			(f) => f.severity === "critical",
-		),
+		...preScanFindings.filter((f) => f.severity === "critical"),
+		...allCrawlerFindings.filter((f) => f.severity === "critical"),
 	];
 
 	const linkFixes = allCrawlerFindings.filter(
-		(f) =>
-			f.category === "misnamed_link" ||
-			f.category === "redundant_link",
+		(f) => f.category === "misnamed_link" || f.category === "redundant_link",
 	);
 
 	const duplicatesAndContradictions = allCrawlerFindings.filter(
-		(f) =>
-			f.category === "duplicate_node" ||
-			f.category === "contradiction",
+		(f) => f.category === "duplicate_node" || f.category === "contradiction",
 	);
 
 	const enrichment = allCrawlerFindings.filter(
@@ -82,14 +74,11 @@ export function buildResolverUserPrompt(
 
 	const cleanup = [
 		...preScanFindings.filter(
-			(f) =>
-				f.severity !== "critical" &&
-				f.category === "expired_temporal",
+			(f) => f.severity !== "critical" && f.category === "expired_temporal",
 		),
 		...allCrawlerFindings.filter(
 			(f) =>
-				f.category === "vague_content" ||
-				f.category === "overcrowded_category",
+				f.category === "vague_content" || f.category === "overcrowded_category",
 		),
 	];
 
@@ -105,8 +94,7 @@ export function buildResolverUserPrompt(
 		formatFindings(cleanup, "CLEANUP"),
 	].filter(Boolean);
 
-	const totalFindings =
-		preScanFindings.length + allCrawlerFindings.length;
+	const totalFindings = preScanFindings.length + allCrawlerFindings.length;
 
 	const summary = [
 		`Total findings: ${totalFindings}`,
@@ -151,9 +139,7 @@ export function buildFixPassPrompt(
 }
 
 /** Build user prompt for just the enrich pass (suggestions). */
-export function buildEnrichPassPrompt(
-	crawlerReports: CrawlerReport[],
-): string {
+export function buildEnrichPassPrompt(crawlerReports: CrawlerReport[]): string {
 	return buildResolverUserPrompt(
 		[],
 		crawlerReports.map((r) => ({

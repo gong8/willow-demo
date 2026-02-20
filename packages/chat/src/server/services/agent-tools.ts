@@ -43,7 +43,13 @@ const ALL_WILLOW_TOOLS = [
 	"mcp__willow__walk_graph",
 ] as const;
 
-type AgentName = "chat" | "search" | "indexer" | "maintenance" | "crawler" | "enricher";
+type AgentName =
+	| "chat"
+	| "search"
+	| "indexer"
+	| "maintenance"
+	| "crawler"
+	| "enricher";
 
 /** Allowlist: each agent declares ONLY the willow tools it may use. */
 const AGENT_ALLOWED_TOOLS: Record<AgentName, readonly string[]> = {
@@ -65,10 +71,7 @@ const AGENT_ALLOWED_TOOLS: Record<AgentName, readonly string[]> = {
 		"mcp__willow__add_link",
 		"mcp__willow__delete_link",
 	],
-	crawler: [
-		"mcp__willow__search_nodes",
-		"mcp__willow__get_context",
-	],
+	crawler: ["mcp__willow__search_nodes", "mcp__willow__get_context"],
 	enricher: [
 		"mcp__willow__search_nodes",
 		"mcp__willow__get_context",

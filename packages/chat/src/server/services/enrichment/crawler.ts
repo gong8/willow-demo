@@ -1,4 +1,5 @@
 import { createLogger } from "../../logger.js";
+import { getDisallowedTools } from "../agent-tools.js";
 import {
 	LLM_MODEL,
 	cleanupDir,
@@ -10,7 +11,6 @@ import {
 	writeMcpConfig,
 	writeSystemPrompt,
 } from "../cli-chat.js";
-import { getDisallowedTools } from "../agent-tools.js";
 import type { CrawlerReport, Finding } from "./types.js";
 
 const log = createLogger("crawler");
@@ -161,10 +161,7 @@ export function spawnCrawler(
 ): Promise<CrawlerReport> {
 	return new Promise((resolve) => {
 		const invocationDir = createInvocationDir();
-		const mcpConfigPath = writeMcpConfig(
-			invocationDir,
-			options.mcpServerPath,
-		);
+		const mcpConfigPath = writeMcpConfig(invocationDir, options.mcpServerPath);
 		const systemPromptPath = writeSystemPrompt(
 			invocationDir,
 			buildCrawlerSystemPrompt(

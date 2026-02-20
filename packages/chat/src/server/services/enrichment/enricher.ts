@@ -90,13 +90,14 @@ export async function runEnrichment(options: {
 	if (subtrees.length === 0) {
 		log.info("No subtrees to crawl, skipping crawler phase");
 		// Still run resolver for pre-scan findings if any
-		const resolverResult = preScanFindings.length > 0
-			? await spawnResolver({
-					preScanFindings,
-					crawlerReports: [],
-					mcpServerPath: options.mcpServerPath,
-				})
-			: { actionsExecuted: 0 };
+		const resolverResult =
+			preScanFindings.length > 0
+				? await spawnResolver({
+						preScanFindings,
+						crawlerReports: [],
+						mcpServerPath: options.mcpServerPath,
+					})
+				: { actionsExecuted: 0 };
 
 		return {
 			preScanFindings,
