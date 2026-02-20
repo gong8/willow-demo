@@ -1,5 +1,5 @@
-import { describe, it, expect } from "vitest";
-import { schemas } from "../schemas.js";
+import { describe, expect, it } from "vitest";
+import { CANONICAL_RELATIONS, schemas } from "../schemas.js";
 
 describe("schemas", () => {
 	describe("createNodeSchema", () => {
@@ -60,6 +60,29 @@ describe("schemas", () => {
 				...input,
 				bidirectional: false,
 			});
+		});
+
+		it("rejects non-canonical relation", () => {
+			const input = {
+				fromNode: "node-A",
+				toNode: "node-B",
+				relation: "will_apply_domain_knowledge",
+			};
+			expect(() => schemas.addLink.parse(input)).toThrow(/Invalid enum value/);
+		});
+
+		it("accepts all canonical relations", () => {
+			for (const relation of CANONICAL_RELATIONS) {
+				const input = {
+					fromNode: "node-A",
+					toNode: "node-B",
+					relation,
+				};
+				expect(schemas.addLink.parse(input)).toEqual({
+					...input,
+					bidirectional: false,
+				});
+			}
 		});
 	});
 

@@ -12,6 +12,9 @@ PRIORITIES:
 5. Apply enhancements (add temporal metadata, create missing links, restructure)
 
 RULES:
+- For non-canonical relations: delete the link and recreate with the closest
+  canonical relation (related_to, contradicts, caused_by, leads_to, depends_on,
+  similar_to, part_of, example_of, derived_from). Use "related_to" if unsure.
 - To rename a link: use delete_link to remove the old one, then add_link
   with the corrected relation name.
 - To set confidence or bidirectional flag on a link: use update_link with the link ID.
@@ -59,6 +62,7 @@ export function buildResolverUserPrompt(
 
 	const linkFixes = allCrawlerFindings.filter(
 		(f) =>
+			f.category === "non_canonical_relation" ||
 			f.category === "misnamed_link" ||
 			f.category === "redundant_link" ||
 			f.category === "low_confidence_link" ||

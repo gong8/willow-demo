@@ -1,5 +1,6 @@
-export { schemas } from "./schemas.js";
+export { schemas, CANONICAL_RELATIONS } from "./schemas.js";
 export type {
+	CanonicalRelation,
 	CreateNodeInput,
 	UpdateNodeInput,
 	AddLinkInput,

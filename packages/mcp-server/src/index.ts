@@ -337,7 +337,7 @@ server.tool(
 // add_link
 server.tool(
 	"add_link",
-	"Create a link between two nodes. Recommended relations: 'related_to', 'contradicts', 'caused_by', 'leads_to', 'depends_on', 'similar_to', 'part_of', 'example_of', 'derived_from'. Set bidirectional=true for symmetric relations like 'related_to' and 'similar_to'.",
+	"Create a link between two nodes. The relation MUST be one of: 'related_to', 'contradicts', 'caused_by', 'leads_to', 'depends_on', 'similar_to', 'part_of', 'example_of', 'derived_from'. Non-canonical values will be rejected. Set bidirectional=true for symmetric relations like 'related_to' and 'similar_to'.",
 	schemas.addLink.shape,
 	async (input) => {
 		try {
@@ -360,7 +360,7 @@ server.tool(
 // update_link
 server.tool(
 	"update_link",
-	"Update a link's relation, directionality, or confidence. Use to correct relation names, mark links as bidirectional, or set confidence levels.",
+	"Update a link's relation, directionality, or confidence. The relation MUST be one of: 'related_to', 'contradicts', 'caused_by', 'leads_to', 'depends_on', 'similar_to', 'part_of', 'example_of', 'derived_from'. Use to correct relation names, mark links as bidirectional, or set confidence levels.",
 	schemas.updateLink.shape,
 	async (input) => {
 		try {

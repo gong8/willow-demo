@@ -29,7 +29,7 @@ export function GraphFilters({
 	relationTypes: string[];
 }) {
 	return (
-		<div className="flex w-48 shrink-0 flex-col gap-1 overflow-y-auto border-r border-border bg-muted/20 p-3">
+		<div className="flex w-56 shrink-0 flex-col gap-1 overflow-y-auto border-r border-border bg-muted/20 p-3">
 			<h3 className="mb-1 text-xs font-medium uppercase tracking-wider text-muted-foreground">
 				Node Types
 			</h3>
@@ -79,7 +79,7 @@ export function GraphFilters({
 									className="inline-block h-2.5 w-2.5 rounded-full"
 									style={{ backgroundColor: enabled ? color : "#64748b" }}
 								/>
-								<span className="flex-1 text-left">{relation}</span>
+								<span className="flex-1 truncate text-left">{relation}</span>
 								<span className="text-xs text-muted-foreground">{count}</span>
 							</button>
 						);

@@ -32,7 +32,16 @@ RULES:
 1. First, use search_nodes to check what already exists — never create duplicates.
 2. Use update_node if a fact updates or corrects something already stored. Provide a reason.
 3. Use add_link to connect related facts across different categories.
-   - Recommended relations: related_to, contradicts, caused_by, leads_to, depends_on, similar_to, part_of, example_of, derived_from.
+   - You MUST use one of these relations (the schema enforces this — non-canonical relations will be rejected):
+     * related_to — general connection (default if unsure)
+     * contradicts — conflicting information
+     * caused_by — A was caused by B
+     * leads_to — A leads to / results in B
+     * depends_on — A requires B
+     * similar_to — A and B are alike
+     * part_of — A is a component of B
+     * example_of — A is an instance of B
+     * derived_from — A originates from B
    - Use bidirectional: true for symmetric relationships like related_to, similar_to.
    - Do NOT set confidence on links — that is handled by maintenance.
 4. Use delete_node to remove information that is clearly outdated or wrong.

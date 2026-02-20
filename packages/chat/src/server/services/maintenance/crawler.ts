@@ -52,6 +52,9 @@ EXPLORATION STRATEGY:
 FOR EACH NODE, EVALUATE:
 - Content quality: Is it clear, specific, non-redundant?
 - Node type: Is "detail" actually an "entity"? Is "attribute" actually an "event"?
+- Non-canonical relations: Does any link use a relation NOT in the canonical set?
+  Canonical relations: related_to, contradicts, caused_by, leads_to, depends_on, similar_to, part_of, example_of, derived_from.
+  Report as "non_canonical_relation" if a link uses anything else.
 - Links: Do any links touching this node have misleading relation names?
   (e.g., "related_to" when "caused_by" or "part_of" is more accurate)
 - Link confidence: Should a link have a confidence level? (low/medium/high)
@@ -90,7 +93,7 @@ RULES:
 - Be specific — include exact node IDs and link IDs in findings.
 - Be opinionated — if something could be better, report it.
 - Don't make changes — you are read-only. Just report findings.
-- Valid categories: misnamed_link, missing_link, redundant_link, low_confidence_link, wrong_direction, duplicate_node, contradiction, misplaced_node, type_mismatch, vague_content, missing_temporal, overcrowded_category, restructure, enhancement
+- Valid categories: non_canonical_relation, misnamed_link, missing_link, redundant_link, low_confidence_link, wrong_direction, duplicate_node, contradiction, misplaced_node, type_mismatch, vague_content, missing_temporal, overcrowded_category, restructure, enhancement
 - Valid severities: critical, warning, suggestion`;
 }
 

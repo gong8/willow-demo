@@ -1,5 +1,21 @@
 import { z } from "zod";
 
+export const CANONICAL_RELATIONS = [
+	"related_to",
+	"contradicts",
+	"caused_by",
+	"leads_to",
+	"depends_on",
+	"similar_to",
+	"part_of",
+	"example_of",
+	"derived_from",
+] as const;
+
+export type CanonicalRelation = (typeof CANONICAL_RELATIONS)[number];
+
+const relationEnum = z.enum(CANONICAL_RELATIONS);
+
 const temporalMetadataSchema = z
 	.object({
 		validFrom: z.string().optional(),
@@ -45,11 +61,9 @@ const updateNodeSchema = z.object({
 const addLinkSchema = z.object({
 	fromNode: z.string().describe("Source node ID"),
 	toNode: z.string().describe("Target node ID"),
-	relation: z
-		.string()
-		.describe(
-			"Relationship label. Recommended: 'related_to', 'contradicts', 'caused_by', 'leads_to', 'depends_on', 'similar_to', 'part_of', 'example_of', 'derived_from'",
-		),
+	relation: relationEnum.describe(
+		"Relationship type. Must be one of: related_to, contradicts, caused_by, leads_to, depends_on, similar_to, part_of, example_of, derived_from",
+	),
 	bidirectional: z
 		.boolean()
 		.optional()
@@ -97,7 +111,7 @@ const deleteNodeSchema = z.object({
 
 const updateLinkSchema = z.object({
 	linkId: z.string().describe("ID of the link to update"),
-	relation: z.string().optional().describe("New relationship label"),
+	relation: relationEnum.optional().describe("New relationship type"),
 	bidirectional: z.boolean().optional().describe("Update directionality"),
 	confidence: z
 		.enum(["low", "medium", "high"])

@@ -7,6 +7,7 @@ export type FindingCategory =
 	| "broken_parent"
 	| "expired_temporal"
 	// crawler
+	| "non_canonical_relation"
 	| "misnamed_link"
 	| "missing_link"
 	| "redundant_link"
