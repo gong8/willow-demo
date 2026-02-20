@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { readFileSync, statSync } from "node:fs";
 import { homedir } from "node:os";
 import { resolve } from "node:path";
 import { JsGraphStore } from "@willow/core";
@@ -21,7 +22,7 @@ import {
 
 const MAINTENANCE_SYSTEM_PROMPT = `You are a knowledge graph maintenance agent. Your job is to analyze and clean up a knowledge graph, performing these operations IN ORDER:
 
-1. ORPHAN CLEANUP: Use get_context on the root node (depth 3) to see the graph structure. Look for structural issues — nodes that seem misplaced, empty categories, or orphaned branches. Delete any clearly empty or useless nodes.
+1. ORPHAN CLEANUP: Use get_context with nodeId "root" (depth 3) to see the graph structure. Look for structural issues — nodes that seem misplaced, empty categories, or orphaned branches. Delete any clearly empty or useless nodes.
 
 2. TEMPORAL EXPIRY: Use search_nodes to find facts that might have time-limited validity (job titles, addresses, ages, "currently" statements). Check if any seem outdated and update or delete them.
 
@@ -29,7 +30,9 @@ const MAINTENANCE_SYSTEM_PROMPT = `You are a knowledge graph maintenance agent. 
 
 4. CONTRADICTION DETECTION: Use search_nodes to find facts that might conflict. If you find contradictions, resolve by keeping the more recent or higher-confidence fact. Add a reason when updating.
 
-5. CATEGORY REBALANCING: Use get_context on root to analyze tree structure. If any category has too many direct children (>10), consider creating sub-collections to organize them. If the tree is too deep (>5 levels), consider flattening.
+5. CATEGORY REBALANCING: Use get_context with nodeId "root" to analyze tree structure. If any category has too many direct children (>10), consider creating sub-collections to organize them. If the tree is too deep (>5 levels), consider flattening.
+
+IMPORTANT: The root node ID is "root". Use get_context(nodeId: "root", depth: 3) to start exploring.
 
 RULES:
 - Be conservative — only make changes you're confident about.
@@ -37,8 +40,11 @@ RULES:
 - Use search_nodes to find related information before making changes.
 - When deleting, verify the node isn't referenced by important links.
 - When merging, preserve the more detailed content.
+- There is no move_node tool. To move a node, create a new one under the correct parent and delete the old one.
 
 Do NOT produce conversational text. Only make tool calls and brief explanations.`;
+
+const GRAPH_DUMP_SIZE_LIMIT = 100 * 1024; // 100KB
 
 const MAINTENANCE_THRESHOLD = process.env.MAINTENANCE_THRESHOLD
 	? Number.parseInt(process.env.MAINTENANCE_THRESHOLD, 10)
@@ -88,8 +94,28 @@ export function runMaintenance(options: {
 		MAINTENANCE_SYSTEM_PROMPT,
 	);
 
-	const prompt =
-		"Perform a full maintenance pass on the knowledge graph. Follow the steps in your system prompt.";
+	// Read graph dump to give the agent full context about the current state
+	const graphPath =
+		process.env.WILLOW_GRAPH_PATH ??
+		resolve(homedir(), ".willow", "graph.json");
+	let prompt: string;
+	try {
+		const graphSize = statSync(graphPath).size;
+		if (graphSize > GRAPH_DUMP_SIZE_LIMIT) {
+			log.info("Graph too large for dump, using search-based prompt", {
+				size: graphSize,
+			});
+			prompt =
+				'Perform a full maintenance pass on the knowledge graph. The graph is too large to include here, so use get_context and search_nodes to explore it. Start with get_context(nodeId: "root", depth: 3) to see the top-level structure, then investigate each category. Follow the steps in your system prompt.';
+		} else {
+			const graphDump = readFileSync(graphPath, "utf-8");
+			prompt = `Here is the current state of the knowledge graph:\n\n<graph_dump>\n${graphDump}\n</graph_dump>\n\nAnalyze the graph above and perform a full maintenance pass. Use the tools to make any needed changes. Follow the steps in your system prompt.`;
+		}
+	} catch {
+		log.warn("Could not read graph file, using search-based prompt");
+		prompt =
+			'Perform a full maintenance pass on the knowledge graph. Use get_context(nodeId: "root", depth: 3) to start exploring the graph structure, then follow the steps in your system prompt.';
+	}
 
 	const args = [
 		"--print",
@@ -119,9 +145,6 @@ export function runMaintenance(options: {
 	const branchName = `maintenance/${job.id.slice(0, 8)}`;
 	let originalBranch: string | null = null;
 	try {
-		const graphPath =
-			process.env.WILLOW_GRAPH_PATH ??
-			resolve(homedir(), ".willow", "graph.json");
 		const store = JsGraphStore.open(graphPath);
 		try {
 			store.currentBranch();
@@ -147,9 +170,6 @@ export function runMaintenance(options: {
 		// Restore original branch on spawn failure
 		if (originalBranch) {
 			try {
-				const graphPath =
-					process.env.WILLOW_GRAPH_PATH ??
-					resolve(homedir(), ".willow", "graph.json");
 				const store = JsGraphStore.open(graphPath);
 				store.switchBranch(originalBranch);
 				store.deleteBranch(branchName);
@@ -214,9 +234,6 @@ export function runMaintenance(options: {
 
 		// Commit on maintenance branch, switch back, merge (like Dependabot)
 		try {
-			const graphPath =
-				process.env.WILLOW_GRAPH_PATH ??
-				resolve(homedir(), ".willow", "graph.json");
 			const store = JsGraphStore.open(graphPath);
 
 			if (store.hasPendingChanges()) {
@@ -260,9 +277,6 @@ export function runMaintenance(options: {
 		// Discard maintenance branch on error
 		if (originalBranch) {
 			try {
-				const graphPath =
-					process.env.WILLOW_GRAPH_PATH ??
-					resolve(homedir(), ".willow", "graph.json");
 				const store = JsGraphStore.open(graphPath);
 				if (store.currentBranch() === branchName) {
 					store.discardChanges();

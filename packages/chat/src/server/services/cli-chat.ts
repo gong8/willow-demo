@@ -220,7 +220,7 @@ function runSearchAgent(query) {
     const prompt = "Find information relevant to this user message:\\n\\n" + query;
     const args = [
       "--print", "--output-format", "stream-json", "--verbose", "--include-partial-messages",
-      "--model", getCliModel(LLM_MODEL), "--dangerously-skip-permissions",
+      "--model", "${getCliModel(LLM_MODEL)}", "--dangerously-skip-permissions",
       "--mcp-config", mcpConfigPath, "--strict-mcp-config",
       "--disallowedTools", ...BLOCKED,
       "--append-system-prompt-file", systemPromptPath,

@@ -26,7 +26,7 @@ vi.mock("../cli-chat.js", async (importOriginal) => {
 	};
 });
 
-vi.mock("fs", () => ({
+vi.mock("node:fs", () => ({
 	readFileSync: vi.fn(() => JSON.stringify({ nodes: {} })),
 	statSync: vi.fn(() => ({ size: 5000 })),
 }));
