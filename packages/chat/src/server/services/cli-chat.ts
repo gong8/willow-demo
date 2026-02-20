@@ -13,7 +13,7 @@ const log = createLogger("cli-chat");
 export { BLOCKED_BUILTIN_TOOLS };
 
 const BASE_TEMP_DIR = join(tmpdir(), "willow-cli");
-const LLM_MODEL = process.env.LLM_MODEL || "claude-opus-4-6";
+export const LLM_MODEL = process.env.LLM_MODEL || "claude-opus-4-6";
 const CLI_IMAGE_MAX_DIM = 1536;
 const CLI_IMAGE_QUALITY = 80;
 
@@ -220,7 +220,7 @@ function runSearchAgent(query) {
     const prompt = "Find information relevant to this user message:\\n\\n" + query;
     const args = [
       "--print", "--output-format", "stream-json", "--verbose", "--include-partial-messages",
-      "--model", "opus", "--dangerously-skip-permissions",
+      "--model", getCliModel(LLM_MODEL), "--dangerously-skip-permissions",
       "--mcp-config", mcpConfigPath, "--strict-mcp-config",
       "--disallowedTools", ...BLOCKED,
       "--append-system-prompt-file", systemPromptPath,

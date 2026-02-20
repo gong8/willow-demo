@@ -8,9 +8,11 @@ import { getDisallowedTools } from "./agent-tools.js";
 const log = createLogger("maintenance");
 import type { SSEEmitter, ToolCallData } from "./cli-chat.js";
 import {
+	LLM_MODEL,
 	cleanupDir,
 	createInvocationDir,
 	createStreamParser,
+	getCliModel,
 	pipeStdout,
 	spawnCli,
 	writeMcpConfig,
@@ -96,7 +98,7 @@ export function runMaintenance(options: {
 		"--verbose",
 		"--include-partial-messages",
 		"--model",
-		"opus",
+		getCliModel(LLM_MODEL),
 		"--dangerously-skip-permissions",
 		"--mcp-config",
 		mcpConfigPath,

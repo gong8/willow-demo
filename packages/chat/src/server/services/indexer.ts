@@ -2,9 +2,11 @@ import { createLogger } from "../logger.js";
 import { getDisallowedTools } from "./agent-tools.js";
 import type { SSEEmitter, ToolCallData } from "./cli-chat.js";
 import {
+	LLM_MODEL,
 	cleanupDir,
 	createInvocationDir,
 	createStreamParser,
+	getCliModel,
 	pipeStdout,
 	spawnCli,
 	writeMcpConfig,
@@ -71,7 +73,7 @@ export function runIndexerAgent(
 			"--verbose",
 			"--include-partial-messages",
 			"--model",
-			"opus",
+			getCliModel(LLM_MODEL),
 			"--dangerously-skip-permissions",
 			"--mcp-config",
 			mcpConfigPath,

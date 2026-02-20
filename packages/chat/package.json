@@ -4,8 +4,8 @@
 	"private": true,
 	"type": "module",
 	"scripts": {
-		"dev": "concurrently \"vite\" \"tsx watch src/server/index.ts\"",
-		"dev:server": "tsx watch src/server/index.ts",
+		"dev": "concurrently \"vite\" \"LOG_LEVEL=debug RUST_LOG=willow_core=debug tsx watch src/server/index.ts\"",
+		"dev:server": "LOG_LEVEL=debug RUST_LOG=willow_core=debug tsx watch src/server/index.ts",
 		"dev:client": "vite",
 		"build": "prisma generate && tsc -b && vite build",
 		"build:server": "tsc -b",

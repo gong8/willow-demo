@@ -7,5 +7,7 @@ target/
 .env.local
 *.tsbuildinfo
 packages/chat/data/
+packages/chat/prisma/data/
+coverage/
 index.js
 index.d.ts
