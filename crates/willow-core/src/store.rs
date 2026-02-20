@@ -445,6 +445,8 @@ impl GraphStore {
         from_node: &str,
         to_node: &str,
         relation: &str,
+        bidirectional: bool,
+        confidence: Option<&str>,
     ) -> Result<Link, WillowError> {
         debug!(from = %from_node, to = %to_node, relation = %relation, "add_link");
         let from_nid = NodeId(from_node.to_string());
@@ -457,9 +459,23 @@ impl GraphStore {
             return Err(WillowError::NodeNotFound(to_node.to_string()));
         }
 
-        // Check for duplicate
+        // Parse confidence
+        let confidence_level = match confidence {
+            Some(s) => Some(
+                ConfidenceLevel::from_str(s)
+                    .ok_or_else(|| WillowError::InvalidConfidence(s.to_string()))?,
+            ),
+            None => None,
+        };
+
+        // Check for duplicate — also check reverse direction when bidirectional
         let is_dup = self.graph.links.values().any(|link| {
-            link.from_node == from_nid && link.to_node == to_nid && link.relation == relation
+            let forward = link.from_node == from_nid && link.to_node == to_nid && link.relation == relation;
+            let reverse = bidirectional
+                && link.from_node == to_nid
+                && link.to_node == from_nid
+                && link.relation == relation;
+            forward || reverse
         });
         if is_dup {
             return Err(WillowError::DuplicateLink {
@@ -474,6 +490,8 @@ impl GraphStore {
             from_node: from_nid,
             to_node: to_nid,
             relation: relation.to_string(),
+            bidirectional,
+            confidence: confidence_level,
             created_at: Utc::now(),
         };
 
@@ -486,6 +504,54 @@ impl GraphStore {
         });
 
         Ok(link)
+    }
+
+    pub fn update_link(
+        &mut self,
+        link_id: &str,
+        relation: Option<&str>,
+        bidirectional: Option<bool>,
+        confidence: Option<&str>,
+    ) -> Result<Link, WillowError> {
+        debug!(link_id = %link_id, "update_link");
+        let lid = LinkId(link_id.to_string());
+
+        let old_link = self
+            .graph
+            .links
+            .get(&lid)
+            .ok_or_else(|| WillowError::LinkNotFound(link_id.to_string()))?
+            .clone();
+
+        let link = self
+            .graph
+            .links
+            .get_mut(&lid)
+            .unwrap();
+
+        if let Some(r) = relation {
+            link.relation = r.to_string();
+        }
+        if let Some(b) = bidirectional {
+            link.bidirectional = b;
+        }
+        if let Some(c) = confidence {
+            link.confidence = Some(
+                ConfidenceLevel::from_str(c)
+                    .ok_or_else(|| WillowError::InvalidConfidence(c.to_string()))?,
+            );
+        }
+
+        let new_link = link.clone();
+        self.save()?;
+
+        self.record_change(Change::UpdateLink {
+            link_id: lid,
+            old_link,
+            new_link: new_link.clone(),
+        });
+
+        Ok(new_link)
     }
 
     pub fn delete_link(&mut self, link_id: &str) -> Result<Link, WillowError> {
@@ -616,7 +682,7 @@ mod tests {
         let detail = store
             .create_node(&cat.id.0, "detail", "Reading", None, None)
             .unwrap();
-        let _link = store.add_link(&cat.id.0, &detail.id.0, "includes").unwrap();
+        let _link = store.add_link(&cat.id.0, &detail.id.0, "includes", false, None).unwrap();
 
         assert_eq!(store.graph.nodes.len(), 3);
         assert_eq!(store.graph.links.len(), 1);
@@ -647,11 +713,13 @@ mod tests {
         let b = store
             .create_node("root", "category", "B", None, None)
             .unwrap();
-        let link = store.add_link(&a.id.0, &b.id.0, "related_to").unwrap();
+        let link = store.add_link(&a.id.0, &b.id.0, "related_to", false, None).unwrap();
 
         assert_eq!(link.from_node, a.id);
         assert_eq!(link.to_node, b.id);
         assert_eq!(link.relation, "related_to");
+        assert!(!link.bidirectional);
+        assert!(link.confidence.is_none());
     }
 
     #[test]
@@ -663,9 +731,54 @@ mod tests {
         let b = store
             .create_node("root", "category", "B", None, None)
             .unwrap();
-        store.add_link(&a.id.0, &b.id.0, "related_to").unwrap();
-        let result = store.add_link(&a.id.0, &b.id.0, "related_to");
+        store.add_link(&a.id.0, &b.id.0, "related_to", false, None).unwrap();
+        let result = store.add_link(&a.id.0, &b.id.0, "related_to", false, None);
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_add_link_with_confidence() {
+        let mut store = temp_store();
+        let a = store.create_node("root", "category", "A", None, None).unwrap();
+        let b = store.create_node("root", "category", "B", None, None).unwrap();
+
+        let link = store.add_link(&a.id.0, &b.id.0, "caused_by", true, Some("high")).unwrap();
+        assert!(link.bidirectional);
+        assert_eq!(link.confidence, Some(ConfidenceLevel::High));
+    }
+
+    #[test]
+    fn test_bidirectional_duplicate_detection() {
+        let mut store = temp_store();
+        let a = store.create_node("root", "category", "A", None, None).unwrap();
+        let b = store.create_node("root", "category", "B", None, None).unwrap();
+
+        // Create A->B bidirectional
+        store.add_link(&a.id.0, &b.id.0, "related_to", true, None).unwrap();
+
+        // B->A with same relation should be rejected when creating as bidirectional
+        let result = store.add_link(&b.id.0, &a.id.0, "related_to", true, None);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_update_link() {
+        let mut store = temp_store();
+        let a = store.create_node("root", "category", "A", None, None).unwrap();
+        let b = store.create_node("root", "category", "B", None, None).unwrap();
+
+        let link = store.add_link(&a.id.0, &b.id.0, "related_to", false, None).unwrap();
+
+        let updated = store.update_link(&link.id.0, Some("caused_by"), Some(true), Some("high")).unwrap();
+        assert_eq!(updated.relation, "caused_by");
+        assert!(updated.bidirectional);
+        assert_eq!(updated.confidence, Some(ConfidenceLevel::High));
+
+        // Partial update
+        let updated2 = store.update_link(&link.id.0, None, None, Some("low")).unwrap();
+        assert_eq!(updated2.relation, "caused_by"); // unchanged
+        assert!(updated2.bidirectional); // unchanged
+        assert_eq!(updated2.confidence, Some(ConfidenceLevel::Low));
     }
 
     #[test]

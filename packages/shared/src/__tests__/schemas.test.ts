@@ -56,7 +56,10 @@ describe("schemas", () => {
 				toNode: "node-B",
 				relation: "related_to",
 			};
-			expect(schemas.addLink.parse(input)).toEqual(input);
+			expect(schemas.addLink.parse(input)).toEqual({
+				...input,
+				bidirectional: false,
+			});
 		});
 	});
 

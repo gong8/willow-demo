@@ -48,8 +48,19 @@ const addLinkSchema = z.object({
 	relation: z
 		.string()
 		.describe(
-			"Relationship label (e.g. 'related_to', 'contradicts', 'caused_by')",
+			"Relationship label. Recommended: 'related_to', 'contradicts', 'caused_by', 'leads_to', 'depends_on', 'similar_to', 'part_of', 'example_of', 'derived_from'",
 		),
+	bidirectional: z
+		.boolean()
+		.optional()
+		.default(false)
+		.describe(
+			"If true, the link can be followed from either endpoint. Use for symmetric relations like 'related_to', 'similar_to'.",
+		),
+	confidence: z
+		.enum(["low", "medium", "high"])
+		.optional()
+		.describe("Confidence level for this link"),
 });
 
 const searchNodesSchema = z.object({
@@ -84,28 +95,43 @@ const deleteNodeSchema = z.object({
 		.describe("ID of the node to delete (cascades to all descendants)"),
 });
 
+const updateLinkSchema = z.object({
+	linkId: z.string().describe("ID of the link to update"),
+	relation: z.string().optional().describe("New relationship label"),
+	bidirectional: z.boolean().optional().describe("Update directionality"),
+	confidence: z
+		.enum(["low", "medium", "high"])
+		.optional()
+		.describe("Update confidence level"),
+});
+
 const deleteLinkSchema = z.object({
 	linkId: z.string().describe("ID of the link to delete"),
 });
 
 const walkGraphSchema = z.object({
 	action: z
-		.enum(["start", "down", "up", "done"])
+		.enum(["start", "down", "up", "follow_link", "done"])
 		.describe(
-			"Navigation action: 'start' begins at root, 'down' enters a child, 'up' backtracks to parent, 'done' ends the search",
+			"Navigation action: 'start' begins at root, 'down' enters a child, 'up' backtracks to parent, 'follow_link' follows a cross-cutting link to the other endpoint, 'done' ends the search",
 		),
 	nodeId: z
 		.string()
 		.optional()
 		.describe(
-			"Target child node ID for 'down', or current node ID for 'up'. Not needed for 'start' or 'done'.",
+			"Target child node ID for 'down', current node ID for 'up' and 'follow_link'. Not needed for 'start' or 'done'.",
 		),
+	linkId: z
+		.string()
+		.optional()
+		.describe("Link ID to follow. Required for 'follow_link' action."),
 });
 
 export const schemas = {
 	createNode: createNodeSchema,
 	updateNode: updateNodeSchema,
 	addLink: addLinkSchema,
+	updateLink: updateLinkSchema,
 	deleteLink: deleteLinkSchema,
 	searchNodes: searchNodesSchema,
 	getContext: getContextSchema,
@@ -116,6 +142,7 @@ export const schemas = {
 export type CreateNodeInput = z.infer<typeof createNodeSchema>;
 export type UpdateNodeInput = z.infer<typeof updateNodeSchema>;
 export type AddLinkInput = z.infer<typeof addLinkSchema>;
+export type UpdateLinkInput = z.infer<typeof updateLinkSchema>;
 export type SearchNodesInput = z.infer<typeof searchNodesSchema>;
 export type GetContextInput = z.infer<typeof getContextSchema>;
 export type DeleteNodeInput = z.infer<typeof deleteNodeSchema>;

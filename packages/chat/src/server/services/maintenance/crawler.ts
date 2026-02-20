@@ -54,6 +54,10 @@ FOR EACH NODE, EVALUATE:
 - Node type: Is "detail" actually an "entity"? Is "attribute" actually an "event"?
 - Links: Do any links touching this node have misleading relation names?
   (e.g., "related_to" when "caused_by" or "part_of" is more accurate)
+- Link confidence: Should a link have a confidence level? (low/medium/high)
+  Report as "low_confidence_link" if a link seems uncertain.
+- Link directionality: Is a directed link that should be bidirectional, or vice versa?
+  Report as "wrong_direction" if the bidirectional flag seems incorrect.
 - Missing links: Should this node be linked to something else in the graph?
 - Temporal: Does the content imply time ("currently", "since 2024") but lack
   temporal metadata?
@@ -86,7 +90,7 @@ RULES:
 - Be specific — include exact node IDs and link IDs in findings.
 - Be opinionated — if something could be better, report it.
 - Don't make changes — you are read-only. Just report findings.
-- Valid categories: misnamed_link, missing_link, redundant_link, duplicate_node, contradiction, misplaced_node, type_mismatch, vague_content, missing_temporal, overcrowded_category, restructure, enhancement
+- Valid categories: misnamed_link, missing_link, redundant_link, low_confidence_link, wrong_direction, duplicate_node, contradiction, misplaced_node, type_mismatch, vague_content, missing_temporal, overcrowded_category, restructure, enhancement
 - Valid severities: critical, warning, suggestion`;
 }
 

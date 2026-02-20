@@ -1,6 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import { Network } from "lucide-react";
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { GraphCanvas } from "reagraph";
 import { transformGraphData } from "../../lib/graph-transform.js";
 import type {
@@ -41,6 +41,9 @@ export function GraphView({
 				"detail",
 			]),
 	);
+	const [enabledRelations, setEnabledRelations] = useState<Set<string>>(
+		() => new Set<string>(),
+	);
 	const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
 	const [selections, setSelections] = useState<string[]>([]);
 
@@ -55,6 +58,18 @@ export function GraphView({
 			return next;
 		});
 	};
+
+	const handleToggleRelation = useCallback((relation: string) => {
+		setEnabledRelations((prev) => {
+			const next = new Set(prev);
+			if (next.has(relation)) {
+				next.delete(relation);
+			} else {
+				next.add(relation);
+			}
+			return next;
+		});
+	}, []);
 
 	const handleNodeClick = useCallback((node: { id: string }) => {
 		setSelectedNodeId(node.id);
@@ -77,11 +92,32 @@ export function GraphView({
 					treeEdgeCount: 0,
 					nodesByType: {},
 					relationTypes: [],
+					linksByRelation: {},
 				},
 			};
 		}
-		return transformGraphData(graph, { enabledTypes, searchQuery });
-	}, [graph, enabledTypes, searchQuery]);
+		return transformGraphData(graph, {
+			enabledTypes,
+			enabledRelations,
+			searchQuery,
+		});
+	}, [graph, enabledTypes, enabledRelations, searchQuery]);
+
+	// Add newly discovered relation types to the enabled set
+	useEffect(() => {
+		if (stats.relationTypes.length === 0) return;
+		setEnabledRelations((prev) => {
+			const next = new Set(prev);
+			let changed = false;
+			for (const rt of stats.relationTypes) {
+				if (!next.has(rt)) {
+					next.add(rt);
+					changed = true;
+				}
+			}
+			return changed ? next : prev;
+		});
+	}, [stats.relationTypes]);
 
 	const selectedNode =
 		selectedNodeId && graph ? graph.nodes[selectedNodeId] : null;
@@ -115,6 +151,10 @@ export function GraphView({
 						enabledTypes={enabledTypes}
 						onToggle={handleToggleType}
 						nodesByType={stats.nodesByType}
+						enabledRelations={enabledRelations}
+						onToggleRelation={handleToggleRelation}
+						linksByRelation={stats.linksByRelation}
+						relationTypes={stats.relationTypes}
 					/>
 
 					<div className="relative flex-1">

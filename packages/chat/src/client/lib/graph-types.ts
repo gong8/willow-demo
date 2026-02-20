@@ -38,6 +38,8 @@ export interface WillowLink {
 	from_node: string;
 	to_node: string;
 	relation: string;
+	bidirectional: boolean;
+	confidence: string | null;
 	created_at: string;
 }
 
@@ -71,6 +73,7 @@ export interface GraphStats {
 	treeEdgeCount: number;
 	nodesByType: Record<string, number>;
 	relationTypes: string[];
+	linksByRelation: Record<string, number>;
 }
 
 export type NodeType =

@@ -28,6 +28,8 @@ function makeLink(
 		from_node: from,
 		to_node: to,
 		relation,
+		bidirectional: false,
+		confidence: null,
 		created_at: "2025-01-01T00:00:00Z",
 	};
 }

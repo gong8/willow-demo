@@ -10,6 +10,8 @@ export type FindingCategory =
 	| "misnamed_link"
 	| "missing_link"
 	| "redundant_link"
+	| "low_confidence_link"
+	| "wrong_direction"
 	| "duplicate_node"
 	| "contradiction"
 	| "misplaced_node"
@@ -87,5 +89,7 @@ export interface RawLink {
 	from_node: string;
 	to_node: string;
 	relation: string;
+	bidirectional: boolean;
+	confidence: string | null;
 	created_at: string;
 }

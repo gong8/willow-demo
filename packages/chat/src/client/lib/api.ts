@@ -128,6 +128,8 @@ export interface LinkChangeSummary {
 	fromNode: string;
 	toNode: string;
 	relation: string;
+	bidirectional: boolean;
+	confidence: string | null;
 }
 
 export interface ChangeSummary {
@@ -136,6 +138,7 @@ export interface ChangeSummary {
 	nodesDeleted: NodeChangeSummary[];
 	linksCreated: LinkChangeSummary[];
 	linksRemoved: LinkChangeSummary[];
+	linksUpdated: LinkChangeSummary[];
 }
 
 export interface CommitDetail {

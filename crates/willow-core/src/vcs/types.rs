@@ -73,6 +73,11 @@ pub enum Change {
         link_id: LinkId,
         link: Link,
     },
+    UpdateLink {
+        link_id: LinkId,
+        old_link: Link,
+        new_link: Link,
+    },
     ReparentNode {
         node_id: NodeId,
         old_parent: Option<NodeId>,
@@ -183,6 +188,11 @@ pub fn apply_delta(graph: &mut Graph, delta: &Delta) {
             }
             Change::RemoveLink { link_id, .. } => {
                 graph.links.remove(link_id);
+            }
+            Change::UpdateLink { link_id, new_link, .. } => {
+                if let Some(link) = graph.links.get_mut(link_id) {
+                    *link = new_link.clone();
+                }
             }
             Change::ReparentNode {
                 node_id,

@@ -39,6 +39,7 @@ const ALL_WILLOW_TOOLS = [
 	"mcp__willow__update_node",
 	"mcp__willow__delete_node",
 	"mcp__willow__add_link",
+	"mcp__willow__update_link",
 	"mcp__willow__delete_link",
 	"mcp__willow__walk_graph",
 ] as const;
@@ -69,6 +70,7 @@ const AGENT_ALLOWED_TOOLS: Record<AgentName, readonly string[]> = {
 		"mcp__willow__update_node",
 		"mcp__willow__delete_node",
 		"mcp__willow__add_link",
+		"mcp__willow__update_link",
 		"mcp__willow__delete_link",
 	],
 	crawler: ["mcp__willow__search_nodes", "mcp__willow__get_context"],
@@ -79,6 +81,7 @@ const AGENT_ALLOWED_TOOLS: Record<AgentName, readonly string[]> = {
 		"mcp__willow__update_node",
 		"mcp__willow__delete_node",
 		"mcp__willow__add_link",
+		"mcp__willow__update_link",
 		"mcp__willow__delete_link",
 	],
 };

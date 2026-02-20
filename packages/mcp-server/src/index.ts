@@ -128,13 +128,13 @@ server.tool(
 // walk_graph
 server.tool(
 	"walk_graph",
-	"Navigate the knowledge tree one step at a time. Use 'start' to begin at root, 'down' to enter a child, 'up' to backtrack to parent, 'done' to end. Returns the current position, path from root, and children.",
+	"Navigate the knowledge tree one step at a time. Use 'start' to begin at root, 'down' to enter a child, 'up' to backtrack to parent, 'follow_link' to follow a cross-cutting link to its other endpoint, 'done' to end. Returns the current position, path from root, children, and cross-cutting links.",
 	schemas.walkGraph.shape,
-	async ({ action, nodeId }) => {
+	async ({ action, nodeId, linkId }) => {
 		try {
-			log.info("walk_graph", { action, nodeId });
+			log.info("walk_graph", { action, nodeId, linkId });
 			const formatView = (targetId: string) => {
-				const ctx = store.getContext(targetId, 1);
+				const ctx = store.getContext(targetId, 2);
 				const position = {
 					id: ctx.node.id,
 					content: ctx.node.content,
@@ -157,9 +157,52 @@ server.tool(
 						content: n.content,
 						type: n.nodeType,
 						childCount: n.children.length,
+						children: ctx.descendants
+							.filter((gc) => gc.parentId === n.id)
+							.map((gc) => ({
+								id: gc.id,
+								content: gc.content.length > 80 ? gc.content.slice(0, 80) + "..." : gc.content,
+								type: gc.nodeType,
+								childCount: gc.children.length,
+							})),
 					}));
 
-				return JSON.stringify({ position, path, children }, null, 2);
+				// Build cross-cutting links touching the current node
+				const links = ctx.links
+					.filter(
+						(l) => l.fromNode === targetId || l.toNode === targetId,
+					)
+					.map((l) => {
+						const isOutgoing = l.fromNode === targetId;
+						const otherNodeId = isOutgoing ? l.toNode : l.fromNode;
+						// Get a short preview of the other node
+						let targetContent = otherNodeId;
+						try {
+							const otherCtx = store.getContext(otherNodeId, 0);
+							targetContent = otherCtx.node.content;
+							if (targetContent.length > 60) {
+								targetContent = `${targetContent.slice(0, 60)}...`;
+							}
+						} catch {
+							// Node may not exist
+						}
+						const canFollow = isOutgoing || l.bidirectional;
+						return {
+							linkId: l.id,
+							relation: l.relation,
+							targetNodeId: otherNodeId,
+							targetContent,
+							direction: isOutgoing ? "outgoing" : "incoming",
+							bidirectional: l.bidirectional,
+							canFollow,
+						};
+					});
+
+				return JSON.stringify(
+					{ position, path, children, links },
+					null,
+					2,
+				);
 			};
 
 			if (action === "start") {
@@ -215,6 +258,52 @@ server.tool(
 				};
 			}
 
+			if (action === "follow_link") {
+				if (!nodeId || !linkId) {
+					return {
+						content: [
+							{
+								type: "text",
+								text: "Error: both nodeId and linkId are required for 'follow_link' action.",
+							},
+						],
+						isError: true,
+					};
+				}
+				// Look up the link from the current node's context
+				const ctx = store.getContext(nodeId, 0);
+				const link = ctx.links.find((l) => l.id === linkId);
+				if (!link) {
+					return {
+						content: [
+							{
+								type: "text",
+								text: `Error: link ${linkId} not found on node ${nodeId}.`,
+							},
+						],
+						isError: true,
+					};
+				}
+				// Check directionality
+				const isOutgoing = link.fromNode === nodeId;
+				if (!isOutgoing && !link.bidirectional) {
+					return {
+						content: [
+							{
+								type: "text",
+								text: `Error: link ${linkId} is directed and cannot be followed from node ${nodeId} (it is incoming and not bidirectional).`,
+							},
+						],
+						isError: true,
+					};
+				}
+				// Navigate to the other endpoint
+				const targetNodeId = isOutgoing ? link.toNode : link.fromNode;
+				return {
+					content: [{ type: "text", text: formatView(targetNodeId) }],
+				};
+			}
+
 			return {
 				content: [{ type: "text", text: `Unknown action: ${action}` }],
 				isError: true,
@@ -248,7 +337,7 @@ server.tool(
 // add_link
 server.tool(
 	"add_link",
-	"Create a directional link between two nodes. Use to represent cross-cutting relationships like 'related_to', 'contradicts', 'caused_by', etc.",
+	"Create a link between two nodes. Recommended relations: 'related_to', 'contradicts', 'caused_by', 'leads_to', 'depends_on', 'similar_to', 'part_of', 'example_of', 'derived_from'. Set bidirectional=true for symmetric relations like 'related_to' and 'similar_to'.",
 	schemas.addLink.shape,
 	async (input) => {
 		try {
@@ -263,6 +352,25 @@ server.tool(
 			};
 		} catch (e) {
 			log.error("add_link failed", { error: (e as Error).message });
+			throw e;
+		}
+	},
+);
+
+// update_link
+server.tool(
+	"update_link",
+	"Update a link's relation, directionality, or confidence. Use to correct relation names, mark links as bidirectional, or set confidence levels.",
+	schemas.updateLink.shape,
+	async (input) => {
+		try {
+			log.info("update_link", { linkId: input.linkId });
+			const link = store.updateLink(input);
+			return {
+				content: [{ type: "text", text: JSON.stringify(link, null, 2) }],
+			};
+		} catch (e) {
+			log.error("update_link failed", { error: (e as Error).message });
 			throw e;
 		}
 	},

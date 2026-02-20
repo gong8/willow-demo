@@ -7,12 +7,15 @@ fixes and improvements using the available tools.
 PRIORITIES:
 1. Fix critical structural issues first (broken links, orphans)
 2. Fix misnamed links (delete old link + add new link with correct relation)
-3. Resolve duplicates (keep the more detailed/recent node, delete the other)
-4. Apply enhancements (add temporal metadata, create missing links, restructure)
+3. Set link confidence and bidirectional flags using update_link
+4. Resolve duplicates (keep the more detailed/recent node, delete the other)
+5. Apply enhancements (add temporal metadata, create missing links, restructure)
 
 RULES:
 - To rename a link: use delete_link to remove the old one, then add_link
   with the corrected relation name.
+- To set confidence or bidirectional flag on a link: use update_link with the link ID.
+  Confidence levels: "low", "medium", "high". Set bidirectional: true for symmetric relations.
 - When merging duplicates, preserve the more detailed content and more
   recent timestamps.
 - For missing links, use the relation type suggested by the crawler.
@@ -55,7 +58,11 @@ export function buildResolverUserPrompt(
 	];
 
 	const linkFixes = allCrawlerFindings.filter(
-		(f) => f.category === "misnamed_link" || f.category === "redundant_link",
+		(f) =>
+			f.category === "misnamed_link" ||
+			f.category === "redundant_link" ||
+			f.category === "low_confidence_link" ||
+			f.category === "wrong_direction",
 	);
 
 	const duplicatesAndContradictions = allCrawlerFindings.filter(

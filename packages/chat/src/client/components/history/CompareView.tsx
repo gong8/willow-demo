@@ -151,7 +151,8 @@ export function CompareView({
 			diff.nodesUpdated.length +
 			diff.nodesDeleted.length +
 			diff.linksCreated.length +
-			diff.linksRemoved.length
+			diff.linksRemoved.length +
+			(diff.linksUpdated?.length ?? 0)
 		: 0;
 
 	if (isLoading || !diff || !toGraph) {

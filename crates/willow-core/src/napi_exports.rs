@@ -42,6 +42,8 @@ pub struct JsLink {
     pub from_node: String,
     pub to_node: String,
     pub relation: String,
+    pub bidirectional: bool,
+    pub confidence: Option<String>,
     pub created_at: String,
 }
 
@@ -86,6 +88,16 @@ pub struct JsAddLinkInput {
     pub from_node: String,
     pub to_node: String,
     pub relation: String,
+    pub bidirectional: Option<bool>,
+    pub confidence: Option<String>,
+}
+
+#[napi(object)]
+pub struct JsUpdateLinkInput {
+    pub link_id: String,
+    pub relation: Option<String>,
+    pub bidirectional: Option<bool>,
+    pub confidence: Option<String>,
 }
 
 // ---- VCS DTO structs ----
@@ -126,6 +138,8 @@ pub struct JsLinkChangeSummary {
     pub from_node: String,
     pub to_node: String,
     pub relation: String,
+    pub bidirectional: bool,
+    pub confidence: Option<String>,
 }
 
 #[napi(object)]
@@ -135,6 +149,7 @@ pub struct JsChangeSummary {
     pub nodes_deleted: Vec<JsNodeChangeSummary>,
     pub links_created: Vec<JsLinkChangeSummary>,
     pub links_removed: Vec<JsLinkChangeSummary>,
+    pub links_updated: Vec<JsLinkChangeSummary>,
 }
 
 #[napi(object)]
@@ -185,6 +200,8 @@ fn link_to_js(link: &model::Link) -> JsLink {
         from_node: link.from_node.0.clone(),
         to_node: link.to_node.0.clone(),
         relation: link.relation.clone(),
+        bidirectional: link.bidirectional,
+        confidence: link.confidence.as_ref().map(|c| c.as_str().to_string()),
         created_at: link.created_at.to_rfc3339(),
     }
 }
@@ -260,6 +277,17 @@ fn commit_entry_to_js(entry: &vcs::types::CommitEntry) -> JsCommitEntry {
     }
 }
 
+fn link_change_to_js(l: &vcs::diff::LinkChangeSummary) -> JsLinkChangeSummary {
+    JsLinkChangeSummary {
+        link_id: l.link_id.clone(),
+        from_node: l.from_node.clone(),
+        to_node: l.to_node.clone(),
+        relation: l.relation.clone(),
+        bidirectional: l.bidirectional,
+        confidence: l.confidence.clone(),
+    }
+}
+
 fn change_summary_to_js(diff: &vcs::diff::ChangeSummary) -> JsChangeSummary {
     JsChangeSummary {
         nodes_created: diff
@@ -295,26 +323,9 @@ fn change_summary_to_js(diff: &vcs::diff::ChangeSummary) -> JsChangeSummary {
                 path: n.path.clone(),
             })
             .collect(),
-        links_created: diff
-            .links_created
-            .iter()
-            .map(|l| JsLinkChangeSummary {
-                link_id: l.link_id.clone(),
-                from_node: l.from_node.clone(),
-                to_node: l.to_node.clone(),
-                relation: l.relation.clone(),
-            })
-            .collect(),
-        links_removed: diff
-            .links_removed
-            .iter()
-            .map(|l| JsLinkChangeSummary {
-                link_id: l.link_id.clone(),
-                from_node: l.from_node.clone(),
-                to_node: l.to_node.clone(),
-                relation: l.relation.clone(),
-            })
-            .collect(),
+        links_created: diff.links_created.iter().map(link_change_to_js).collect(),
+        links_removed: diff.links_removed.iter().map(link_change_to_js).collect(),
+        links_updated: diff.links_updated.iter().map(link_change_to_js).collect(),
     }
 }
 
@@ -440,7 +451,29 @@ impl JsGraphStore {
         info!(from = %input.from_node, to = %input.to_node, relation = %input.relation, "add_link");
         let link = self
             .inner
-            .add_link(&input.from_node, &input.to_node, &input.relation)
+            .add_link(
+                &input.from_node,
+                &input.to_node,
+                &input.relation,
+                input.bidirectional.unwrap_or(false),
+                input.confidence.as_deref(),
+            )
+            .map_err(napi::Error::from)?;
+
+        Ok(link_to_js(&link))
+    }
+
+    #[napi]
+    pub fn update_link(&mut self, input: JsUpdateLinkInput) -> napi::Result<JsLink> {
+        info!(link_id = %input.link_id, "update_link");
+        let link = self
+            .inner
+            .update_link(
+                &input.link_id,
+                input.relation.as_deref(),
+                input.bidirectional,
+                input.confidence.as_deref(),
+            )
             .map_err(napi::Error::from)?;
 
         Ok(link_to_js(&link))
@@ -617,7 +650,8 @@ impl JsGraphStore {
             || !diff.nodes_updated.is_empty()
             || !diff.nodes_deleted.is_empty()
             || !diff.links_created.is_empty()
-            || !diff.links_removed.is_empty())
+            || !diff.links_removed.is_empty()
+            || !diff.links_updated.is_empty())
     }
 
     #[napi]
@@ -656,6 +690,7 @@ impl JsGraphStore {
                     nodes_deleted: vec![],
                     links_created: vec![],
                     links_removed: vec![],
+                    links_updated: vec![],
                 });
             }
         };

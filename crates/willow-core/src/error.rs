@@ -27,6 +27,9 @@ pub enum WillowError {
         relation: String,
     },
 
+    #[error("Invalid confidence level: {0}")]
+    InvalidConfidence(String),
+
     #[error("IO error: {0}")]
     Io(#[from] std::io::Error),
 

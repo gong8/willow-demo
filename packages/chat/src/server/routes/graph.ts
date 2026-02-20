@@ -66,7 +66,8 @@ graphRoutes.get("/status", (c) => {
 					diff.nodesUpdated.length > 0 ||
 					diff.nodesDeleted.length > 0 ||
 					diff.linksCreated.length > 0 ||
-					diff.linksRemoved.length > 0;
+					diff.linksRemoved.length > 0 ||
+					diff.linksUpdated.length > 0;
 			} catch {
 				// If comparison fails, assume no changes
 			}

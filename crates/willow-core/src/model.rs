@@ -75,12 +75,42 @@ pub struct Node {
     pub updated_at: DateTime<Utc>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ConfidenceLevel {
+    Low,
+    Medium,
+    High,
+}
+
+impl ConfidenceLevel {
+    pub fn from_str(s: &str) -> Option<ConfidenceLevel> {
+        match s {
+            "low" => Some(ConfidenceLevel::Low),
+            "medium" => Some(ConfidenceLevel::Medium),
+            "high" => Some(ConfidenceLevel::High),
+            _ => None,
+        }
+    }
+
+    pub fn as_str(&self) -> &str {
+        match self {
+            ConfidenceLevel::Low => "low",
+            ConfidenceLevel::Medium => "medium",
+            ConfidenceLevel::High => "high",
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Link {
     pub id: LinkId,
     pub from_node: NodeId,
     pub to_node: NodeId,
     pub relation: String,
+    #[serde(default)]
+    pub bidirectional: bool,
+    pub confidence: Option<ConfidenceLevel>,
     pub created_at: DateTime<Utc>,
 }
 

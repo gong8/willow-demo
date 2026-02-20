@@ -32,6 +32,12 @@ export const LINK_COLORS: Record<string, string> = {
 	related_to: "#f59e0b",
 	contradicts: "#ef4444",
 	caused_by: "#22c55e",
+	leads_to: "#3b82f6",
+	depends_on: "#f97316",
+	similar_to: "#eab308",
+	part_of: "#8b5cf6",
+	example_of: "#14b8a6",
+	derived_from: "#ec4899",
 };
 export const DEFAULT_LINK_COLOR = "#a78bfa";
 
@@ -41,6 +47,7 @@ export const TREE_EDGE_COLOR = "#94a3b8";
 
 export interface TransformOptions {
 	enabledTypes: Set<NodeType>;
+	enabledRelations?: Set<string>;
 	searchQuery: string;
 }
 
@@ -54,7 +61,7 @@ export function transformGraphData(
 	graph: WillowGraph,
 	options: TransformOptions,
 ): TransformResult {
-	const { enabledTypes, searchQuery } = options;
+	const { enabledTypes, enabledRelations, searchQuery } = options;
 	const query = searchQuery.toLowerCase();
 
 	// 1. Build visible node set
@@ -97,13 +104,21 @@ export function transformGraphData(
 
 	// 3. Cross-link edges
 	const relationTypes = new Set<string>();
+	const linksByRelation: Record<string, number> = {};
 	let linkCount = 0;
 
 	for (const link of Object.values(graph.links)) {
+		// Count all links for stats (regardless of visibility)
+		linksByRelation[link.relation] =
+			(linksByRelation[link.relation] ?? 0) + 1;
+		relationTypes.add(link.relation);
+
 		if (!visibleIds.has(link.from_node) || !visibleIds.has(link.to_node))
 			continue;
 
-		relationTypes.add(link.relation);
+		// Filter by enabled relations if provided
+		if (enabledRelations && !enabledRelations.has(link.relation)) continue;
+
 		linkCount++;
 		edges.push({
 			id: `link__${link.id}`,
@@ -130,6 +145,7 @@ export function transformGraphData(
 			treeEdgeCount,
 			nodesByType,
 			relationTypes: [...relationTypes],
+			linksByRelation,
 		},
 	};
 }

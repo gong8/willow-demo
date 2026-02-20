@@ -16,6 +16,8 @@ pub struct LinkChangeSummary {
     pub from_node: String,
     pub to_node: String,
     pub relation: String,
+    pub bidirectional: bool,
+    pub confidence: Option<String>,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -25,6 +27,7 @@ pub struct ChangeSummary {
     pub nodes_deleted: Vec<NodeChangeSummary>,
     pub links_created: Vec<LinkChangeSummary>,
     pub links_removed: Vec<LinkChangeSummary>,
+    pub links_updated: Vec<LinkChangeSummary>,
 }
 
 /// Build the path from root to a node (list of content strings).
@@ -96,6 +99,8 @@ pub fn compute_graph_diff(old: &Graph, new: &Graph) -> ChangeSummary {
                 from_node: link.from_node.0.clone(),
                 to_node: link.to_node.0.clone(),
                 relation: link.relation.clone(),
+                bidirectional: link.bidirectional,
+                confidence: link.confidence.as_ref().map(|c| c.as_str().to_string()),
             });
         }
     }
@@ -108,7 +113,28 @@ pub fn compute_graph_diff(old: &Graph, new: &Graph) -> ChangeSummary {
                 from_node: link.from_node.0.clone(),
                 to_node: link.to_node.0.clone(),
                 relation: link.relation.clone(),
+                bidirectional: link.bidirectional,
+                confidence: link.confidence.as_ref().map(|c| c.as_str().to_string()),
             });
+        }
+    }
+
+    // Links updated (present in both, but relation/bidirectional/confidence changed)
+    for (lid, new_link) in &new.links {
+        if let Some(old_link) = old.links.get(lid) {
+            if old_link.relation != new_link.relation
+                || old_link.bidirectional != new_link.bidirectional
+                || old_link.confidence != new_link.confidence
+            {
+                summary.links_updated.push(LinkChangeSummary {
+                    link_id: lid.0.clone(),
+                    from_node: new_link.from_node.0.clone(),
+                    to_node: new_link.to_node.0.clone(),
+                    relation: new_link.relation.clone(),
+                    bidirectional: new_link.bidirectional,
+                    confidence: new_link.confidence.as_ref().map(|c| c.as_str().to_string()),
+                });
+            }
         }
     }
 
@@ -259,6 +285,8 @@ mod tests {
                 from_node: NodeId("root".to_string()),
                 to_node: NodeId("root".to_string()),
                 relation: "self".to_string(),
+                bidirectional: false,
+                confidence: None,
                 created_at: Utc::now(),
             },
         );
@@ -270,5 +298,37 @@ mod tests {
         // Reverse
         let diff2 = compute_graph_diff(&new, &old);
         assert_eq!(diff2.links_removed.len(), 1);
+    }
+
+    #[test]
+    fn test_diff_link_updated() {
+        let mut old = empty_graph();
+        let lid = LinkId("l1".to_string());
+        old.links.insert(
+            lid.clone(),
+            Link {
+                id: lid.clone(),
+                from_node: NodeId("root".to_string()),
+                to_node: NodeId("root".to_string()),
+                relation: "related_to".to_string(),
+                bidirectional: false,
+                confidence: None,
+                created_at: Utc::now(),
+            },
+        );
+
+        let mut new = old.clone();
+        let link = new.links.get_mut(&lid).unwrap();
+        link.relation = "caused_by".to_string();
+        link.bidirectional = true;
+        link.confidence = Some(crate::model::ConfidenceLevel::High);
+
+        let diff = compute_graph_diff(&old, &new);
+        assert_eq!(diff.links_updated.len(), 1);
+        assert_eq!(diff.links_updated[0].relation, "caused_by");
+        assert!(diff.links_updated[0].bidirectional);
+        assert_eq!(diff.links_updated[0].confidence.as_deref(), Some("high"));
+        assert!(diff.links_created.is_empty());
+        assert!(diff.links_removed.is_empty());
     }
 }

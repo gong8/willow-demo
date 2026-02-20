@@ -260,6 +260,7 @@ impl Repository {
             && diff.nodes_deleted.is_empty()
             && diff.links_created.is_empty()
             && diff.links_removed.is_empty()
+            && diff.links_updated.is_empty()
         {
             return Ok(None);
         }
