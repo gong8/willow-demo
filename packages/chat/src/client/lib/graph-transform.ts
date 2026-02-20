@@ -4,7 +4,7 @@ import type {
 	GraphStats,
 	NodeType,
 	WillowGraph,
-} from "./graph-types";
+} from "./graph-types.js";
 
 // ---------- Colors & sizes ----------
 
@@ -57,14 +57,6 @@ export interface TransformResult {
 	stats: GraphStats;
 }
 
-function increment(record: Record<string, number>, key: string) {
-	record[key] = (record[key] ?? 0) + 1;
-}
-
-function truncate(text: string, max: number) {
-	return text.length > max ? `${text.slice(0, max)}...` : text;
-}
-
 export function transformGraphData(
 	graph: WillowGraph,
 	options: TransformOptions,
@@ -72,34 +64,36 @@ export function transformGraphData(
 	const { enabledTypes, enabledRelations, searchQuery } = options;
 	const query = searchQuery.toLowerCase();
 
+	// 1. Build visible node set
 	const visibleIds = new Set<string>();
 	const nodes: GraphNode[] = [];
-	const nodesByType: Record<string, number> = {};
 
 	for (const [id, node] of Object.entries(graph.nodes)) {
-		increment(nodesByType, node.node_type);
-
 		if (!enabledTypes.has(node.node_type)) continue;
 		if (query && !node.content.toLowerCase().includes(query)) continue;
 
 		visibleIds.add(id);
 		nodes.push({
 			id,
-			label: truncate(node.content, 40),
+			label:
+				node.content.length > 40
+					? `${node.content.slice(0, 40)}...`
+					: node.content,
 			fill: NODE_COLORS[node.node_type] ?? NODE_COLORS.detail,
 			size: NODE_SIZES[node.node_type] ?? NODE_SIZES.detail,
 		});
 	}
 
+	// 2. Tree edges (parent → child)
 	const edges: GraphEdge[] = [];
 	let treeEdgeCount = 0;
 
 	for (const id of visibleIds) {
-		const { parent_id } = graph.nodes[id];
-		if (parent_id && visibleIds.has(parent_id)) {
+		const node = graph.nodes[id];
+		if (node.parent_id && visibleIds.has(node.parent_id)) {
 			edges.push({
-				id: `tree__${parent_id}__${id}`,
-				source: parent_id,
+				id: `tree__${node.parent_id}__${id}`,
+				source: node.parent_id,
 				target: id,
 				size: 1,
 				fill: TREE_EDGE_COLOR,
@@ -108,16 +102,20 @@ export function transformGraphData(
 		}
 	}
 
+	// 3. Cross-link edges
 	const relationTypes = new Set<string>();
 	const linksByRelation: Record<string, number> = {};
 	let linkCount = 0;
 
 	for (const link of Object.values(graph.links)) {
-		increment(linksByRelation, link.relation);
+		// Count all links for stats (regardless of visibility)
+		linksByRelation[link.relation] = (linksByRelation[link.relation] ?? 0) + 1;
 		relationTypes.add(link.relation);
 
 		if (!visibleIds.has(link.from_node) || !visibleIds.has(link.to_node))
 			continue;
+
+		// Filter by enabled relations if provided
 		if (enabledRelations && !enabledRelations.has(link.relation)) continue;
 
 		linkCount++;
@@ -129,6 +127,12 @@ export function transformGraphData(
 			size: 2,
 			fill: LINK_COLORS[link.relation] ?? DEFAULT_LINK_COLOR,
 		});
+	}
+
+	// 4. Stats
+	const nodesByType: Record<string, number> = {};
+	for (const node of Object.values(graph.nodes)) {
+		nodesByType[node.node_type] = (nodesByType[node.node_type] ?? 0) + 1;
 	}
 
 	return {

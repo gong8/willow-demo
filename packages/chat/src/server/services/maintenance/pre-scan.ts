@@ -1,4 +1,4 @@
-import type { Finding, RawGraph } from "./types";
+import type { Finding, RawGraph } from "./types.js";
 
 let nextId = 1;
 
@@ -10,10 +10,7 @@ function finding(fields: Omit<Finding, "id" | "source">): Finding {
 	};
 }
 
-function snippet(content: string): string {
-	return content.slice(0, 50);
-}
-
+/** Check that both endpoints of every link exist and are not self-links. */
 function checkLinkIntegrity(graph: RawGraph): Finding[] {
 	const findings: Finding[] = [];
 	for (const [linkId, link] of Object.entries(graph.links)) {
@@ -52,17 +49,23 @@ function checkLinkIntegrity(graph: RawGraph): Finding[] {
 	return findings;
 }
 
+/** BFS from root to find orphan nodes and broken parent references. */
 function checkOrphansAndParents(graph: RawGraph): Finding[] {
 	const findings: Finding[] = [];
-
-	// BFS from root to find reachable nodes
 	const visited = new Set<string>();
 	const queue = [graph.root_id];
-	for (let nodeId = queue.shift(); nodeId; nodeId = queue.shift()) {
+
+	while (queue.length > 0) {
+		const nodeId = queue.shift()!;
 		if (visited.has(nodeId)) continue;
 		visited.add(nodeId);
+
 		const node = graph.nodes[nodeId];
-		if (node) queue.push(...node.children.filter((c) => !visited.has(c)));
+		if (!node) continue;
+
+		for (const childId of node.children) {
+			if (!visited.has(childId)) queue.push(childId);
+		}
 	}
 
 	for (const [nodeId, node] of Object.entries(graph.nodes)) {
@@ -71,7 +74,7 @@ function checkOrphansAndParents(graph: RawGraph): Finding[] {
 				finding({
 					category: "orphan_node",
 					severity: "critical",
-					title: `Orphan node: "${snippet(node.content)}"`,
+					title: `Orphan node: "${node.content.slice(0, 50)}"`,
 					description: `Node "${nodeId}" is not reachable from root via children arrays.`,
 					nodeIds: [nodeId],
 					linkIds: [],
@@ -80,41 +83,43 @@ function checkOrphansAndParents(graph: RawGraph): Finding[] {
 			);
 		}
 
-		if (!node.parent_id) continue;
-		const parent = graph.nodes[node.parent_id];
-		if (!parent) {
-			findings.push(
-				finding({
-					category: "broken_parent",
-					severity: "critical",
-					title: `Parent node missing for "${snippet(node.content)}"`,
-					description: `Node "${nodeId}" references non-existent parent "${node.parent_id}".`,
-					nodeIds: [nodeId],
-					linkIds: [],
-					suggestedAction: `Re-parent node ${nodeId} under root or delete it`,
-				}),
-			);
-		} else if (!parent.children.includes(nodeId)) {
-			findings.push(
-				finding({
-					category: "broken_parent",
-					severity: "warning",
-					title: `Parent-child mismatch for "${snippet(node.content)}"`,
-					description: `Node "${nodeId}" claims parent "${node.parent_id}" but parent's children array does not include it.`,
-					nodeIds: [nodeId, node.parent_id],
-					linkIds: [],
-					suggestedAction: `Add ${nodeId} to parent's children array or update parent_id`,
-				}),
-			);
+		if (node.parent_id) {
+			const parent = graph.nodes[node.parent_id];
+			if (!parent) {
+				findings.push(
+					finding({
+						category: "broken_parent",
+						severity: "critical",
+						title: `Parent node missing for "${node.content.slice(0, 50)}"`,
+						description: `Node "${nodeId}" references non-existent parent "${node.parent_id}".`,
+						nodeIds: [nodeId],
+						linkIds: [],
+						suggestedAction: `Re-parent node ${nodeId} under root or delete it`,
+					}),
+				);
+			} else if (!parent.children.includes(nodeId)) {
+				findings.push(
+					finding({
+						category: "broken_parent",
+						severity: "warning",
+						title: `Parent-child mismatch for "${node.content.slice(0, 50)}"`,
+						description: `Node "${nodeId}" claims parent "${node.parent_id}" but parent's children array does not include it.`,
+						nodeIds: [nodeId, node.parent_id],
+						linkIds: [],
+						suggestedAction: `Add ${nodeId} to parent's children array or update parent_id`,
+					}),
+				);
+			}
 		}
 	}
 
 	return findings;
 }
 
+/** Find nodes with temporal.valid_until in the past. */
 function checkExpiredTemporal(graph: RawGraph): Finding[] {
-	const now = new Date();
 	const findings: Finding[] = [];
+	const now = new Date();
 
 	for (const [nodeId, node] of Object.entries(graph.nodes)) {
 		const validUntil = node.temporal?.valid_until;
@@ -123,7 +128,7 @@ function checkExpiredTemporal(graph: RawGraph): Finding[] {
 				finding({
 					category: "expired_temporal",
 					severity: "warning",
-					title: `Expired fact: "${snippet(node.content)}"`,
+					title: `Expired fact: "${node.content.slice(0, 50)}"`,
 					description: `Node "${nodeId}" has valid_until "${validUntil}" which is in the past.`,
 					nodeIds: [nodeId],
 					linkIds: [],

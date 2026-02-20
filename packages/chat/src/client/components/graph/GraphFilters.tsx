@@ -2,8 +2,8 @@ import {
 	DEFAULT_LINK_COLOR,
 	LINK_COLORS,
 	NODE_COLORS,
-} from "../../lib/graph-transform";
-import type { NodeType } from "../../lib/graph-types";
+} from "../../lib/graph-transform.js";
+import type { NodeType } from "../../lib/graph-types.js";
 
 const NODE_TYPE_LABELS: Record<NodeType, string> = {
 	root: "Root",

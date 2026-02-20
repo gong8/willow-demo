@@ -58,41 +58,48 @@ function edgeIdsForNodes(edges: GraphEdge[], nodeIds: Set<string>): string[] {
 		.map((e) => e.id);
 }
 
+function allEdgeIds(edges: GraphEdge[]): string[] {
+	return edges.map((e) => e.id);
+}
+
 function getAncestorIds(graph: WillowGraph, nodeId: string): string[] {
 	return getAncestors(graph, nodeId).map((n) => n.id);
 }
 
-/** Collect related node IDs (ancestors, children, or parent) into a set, respecting MAX_NODES. */
-function collectRelated(
+function addAncestors(
 	graph: WillowGraph,
 	nodeId: string,
 	collected: Set<string>,
-	mode: "ancestors" | "children" | "parent",
 ): void {
-	const node = graph.nodes[nodeId];
-	if (!node) return;
-
-	if (mode === "parent") {
-		if (node.parent_id && graph.nodes[node.parent_id]) {
-			collected.add(node.parent_id);
-		}
-		return;
-	}
-
-	if (mode === "children") {
-		for (const childId of node.children) {
-			if (graph.nodes[childId]) {
-				collected.add(childId);
-				if (collected.size >= MAX_NODES) break;
-			}
-		}
-		return;
-	}
-
-	// ancestors
 	for (const ancestor of getAncestors(graph, nodeId)) {
 		collected.add(ancestor.id);
 		if (collected.size >= MAX_NODES) break;
+	}
+}
+
+function addChildren(
+	graph: WillowGraph,
+	nodeId: string,
+	collected: Set<string>,
+): void {
+	const node = graph.nodes[nodeId];
+	if (!node) return;
+	for (const childId of node.children) {
+		if (graph.nodes[childId]) {
+			collected.add(childId);
+			if (collected.size >= MAX_NODES) break;
+		}
+	}
+}
+
+function addParent(
+	graph: WillowGraph,
+	nodeId: string,
+	collected: Set<string>,
+): void {
+	const node = graph.nodes[nodeId];
+	if (node?.parent_id && graph.nodes[node.parent_id]) {
+		collected.add(node.parent_id);
 	}
 }
 
@@ -119,34 +126,20 @@ function collectNeighborhoodIds(
 	return collected;
 }
 
-// ---------- BFS ----------
-
-/** Core BFS over a graph, optionally restricted to a subset of node IDs. */
-function bfs(
+function bfsOverSubset(
 	graph: WillowGraph,
 	startIds: string[],
-	opts: { limit?: number; subset?: Set<string>; maxLayers?: number },
-): { collected: Set<string>; layers: string[][] } {
-	const {
-		limit = MAX_NODES,
-		subset,
-		maxLayers = Number.POSITIVE_INFINITY,
-	} = opts;
-	const collected = new Set<string>();
+	subset: Set<string>,
+	maxLayers: number,
+): string[][] {
 	const layers: string[][] = [];
-	let frontier = startIds.filter((id) =>
-		subset ? subset.has(id) : graph.nodes[id],
-	);
+	const visited = new Set<string>();
+	let frontier = startIds.filter((id) => subset.has(id));
 
-	while (
-		frontier.length > 0 &&
-		collected.size < limit &&
-		layers.length < maxLayers
-	) {
+	while (frontier.length > 0 && layers.length < maxLayers) {
 		const layer: string[] = [];
 		for (const id of frontier) {
-			if (collected.size >= limit) break;
-			collected.add(id);
+			visited.add(id);
 			layer.push(id);
 		}
 		layers.push(layer);
@@ -156,25 +149,14 @@ function bfs(
 			const node = graph.nodes[id];
 			if (!node) continue;
 			for (const childId of node.children) {
-				if (collected.has(childId)) continue;
-				if (subset ? subset.has(childId) : graph.nodes[childId]) {
+				if (!visited.has(childId) && subset.has(childId)) {
 					next.push(childId);
 				}
 			}
 		}
 		frontier = next;
 	}
-	return { collected, layers };
-}
-
-export function bfsCollect(
-	graph: WillowGraph,
-	limit: number,
-): { collected: Set<string>; layers: string[][] } {
-	if (!graph.root_id || !graph.nodes[graph.root_id]) {
-		return { collected: new Set(), layers: [] };
-	}
-	return bfs(graph, [graph.root_id], { limit });
+	return layers;
 }
 
 export function buildSubgraphFromNodes(
@@ -214,7 +196,42 @@ export function buildSubgraphFromNodes(
 	return { nodes, edges };
 }
 
-// ---------- Animation phase builder ----------
+// ---------- Extractors ----------
+
+export function bfsCollect(
+	graph: WillowGraph,
+	limit: number,
+): { collected: Set<string>; layers: string[][] } {
+	const collected = new Set<string>();
+	const layers: string[][] = [];
+	if (!graph.root_id || !graph.nodes[graph.root_id]) {
+		return { collected, layers };
+	}
+
+	let frontier = [graph.root_id];
+	while (frontier.length > 0 && collected.size < limit) {
+		const layer: string[] = [];
+		for (const id of frontier) {
+			if (collected.size >= limit) break;
+			collected.add(id);
+			layer.push(id);
+		}
+		layers.push(layer);
+
+		const next: string[] = [];
+		for (const id of frontier) {
+			const node = graph.nodes[id];
+			if (!node) continue;
+			for (const childId of node.children) {
+				if (!collected.has(childId) && graph.nodes[childId]) {
+					next.push(childId);
+				}
+			}
+		}
+		frontier = next;
+	}
+	return { collected, layers };
+}
 
 function buildBfsPhases(
 	layers: string[][],
@@ -226,6 +243,7 @@ function buildBfsPhases(
 
 	for (const layer of layers) {
 		for (const id of layer) visited.add(id);
+
 		phases.push({
 			activeNodeIds: [...visited],
 			activeEdgeIds: edgeIdsForNodes(edges, visited),
@@ -233,7 +251,8 @@ function buildBfsPhases(
 		});
 	}
 
-	if (selectedNodeIds?.length && phases.length > 0) {
+	// Final phase: highlight matches
+	if (selectedNodeIds && selectedNodeIds.length > 0 && phases.length > 0) {
 		const last = phases[phases.length - 1];
 		phases.push({
 			activeNodeIds: last.activeNodeIds,
@@ -245,13 +264,12 @@ function buildBfsPhases(
 	return phases;
 }
 
-// ---------- Extractors ----------
-
 function extractSearchNodes(
 	graph: WillowGraph,
 	_args: Record<string, unknown>,
 	result: unknown,
 ): SubgraphData | null {
+	// Parse matched IDs from result (if available)
 	let matchedIds: string[] = [];
 	const hasResult = result !== undefined && result !== null;
 	if (hasResult) {
@@ -266,14 +284,16 @@ function extractSearchNodes(
 					.filter(Boolean);
 			}
 		} catch {
-			// result not parseable
+			// result not parseable — will show BFS-only animation
 		}
 	}
 
-	if (hasResult && matchedIds.length === 0) return null;
+	if (hasResult && matchedIds.length === 0) {
+		return null;
+	}
 
-	// No result yet -- show BFS "searching" animation
 	if (!hasResult) {
+		// No result yet — show BFS "searching" animation across the tree
 		const { collected, layers } = bfsCollect(graph, MAX_NODES);
 		if (collected.size < 2) return null;
 
@@ -287,19 +307,24 @@ function extractSearchNodes(
 		return { nodes, edges, phases, focusNodeIds: [graph.root_id] };
 	}
 
-	// With results -- show matched nodes with ancestors
 	const collected = new Set<string>();
 	if (graph.root_id) collected.add(graph.root_id);
 
 	for (const id of matchedIds) {
 		collected.add(id);
-		collectRelated(graph, id, collected, "ancestors");
+		addAncestors(graph, id, collected);
 		if (collected.size >= MAX_NODES) break;
 	}
 
 	const { nodes, edges } = buildSubgraphFromNodes(graph, collected);
-	const rootIds = graph.root_id ? [graph.root_id] : [];
-	const { layers } = bfs(graph, rootIds, { subset: collected, maxLayers: 10 });
+
+	const layers = bfsOverSubset(
+		graph,
+		graph.root_id ? [graph.root_id] : [],
+		collected,
+		10,
+	);
+
 	const validMatches = matchedIds.filter((id) => collected.has(id));
 	const bfsPhases = buildBfsPhases(layers, edges, validMatches);
 
@@ -326,17 +351,21 @@ function extractGetContext(
 	if (!graph.nodes[nodeId]) return null;
 
 	const collected = new Set<string>([nodeId]);
-	collectRelated(graph, nodeId, collected, "ancestors");
-	collectRelated(graph, nodeId, collected, "children");
+	addAncestors(graph, nodeId, collected);
+	addChildren(graph, nodeId, collected);
 
 	const { nodes, edges } = buildSubgraphFromNodes(graph, collected);
-	const allEdges = edges.map((e) => e.id);
+
 	const ancestorIds = getAncestorIds(graph, nodeId);
 	const coreIds = new Set([nodeId, ...ancestorIds]);
 	const coreEdgeIds = edgeIdsForNodes(edges, coreIds);
 
 	const phases: AnimationPhase[] = [
-		{ activeNodeIds: [nodeId], activeEdgeIds: [], selectedNodeIds: [nodeId] },
+		{
+			activeNodeIds: [nodeId],
+			activeEdgeIds: [],
+			selectedNodeIds: [nodeId],
+		},
 		{
 			activeNodeIds: [nodeId, ...ancestorIds],
 			activeEdgeIds: coreEdgeIds,
@@ -344,7 +373,7 @@ function extractGetContext(
 		},
 		{
 			activeNodeIds: [...collected],
-			activeEdgeIds: allEdges,
+			activeEdgeIds: allEdgeIds(edges),
 			selectedNodeIds: [nodeId],
 		},
 		{
@@ -374,7 +403,7 @@ function extractCreateNode(
 	if (!graph.nodes[parentId]) return null;
 
 	const collected = new Set<string>([parentId]);
-	collectRelated(graph, parentId, collected, "children");
+	addChildren(graph, parentId, collected);
 
 	if (newNodeId && graph.nodes[newNodeId]) {
 		collected.add(newNodeId);
@@ -411,7 +440,7 @@ function extractCreateNode(
 		},
 		{
 			activeNodeIds: [...collected],
-			activeEdgeIds: edges.map((e) => e.id),
+			activeEdgeIds: allEdgeIds(edges),
 			selectedNodeIds: selectedIds,
 		},
 		{
@@ -433,17 +462,17 @@ function extractNeighborhoodFocus(
 	if (!collected) return null;
 
 	const { nodes, edges } = buildSubgraphFromNodes(graph, collected);
-	const allEdges = edges.map((e) => e.id);
+	const allIds = allEdgeIds(edges);
 
 	const phases: AnimationPhase[] = [
 		{
 			activeNodeIds: [...collected],
-			activeEdgeIds: allEdges,
+			activeEdgeIds: allIds,
 			selectedNodeIds: [],
 		},
 		{
 			activeNodeIds: [...collected],
-			activeEdgeIds: allEdges,
+			activeEdgeIds: allIds,
 			selectedNodeIds: [nodeId],
 		},
 		{
@@ -465,8 +494,8 @@ function extractAddLink(
 	if (!graph.nodes[sourceId] || !graph.nodes[targetId]) return null;
 
 	const collected = new Set<string>([sourceId, targetId]);
-	collectRelated(graph, sourceId, collected, "parent");
-	collectRelated(graph, targetId, collected, "parent");
+	addParent(graph, sourceId, collected);
+	addParent(graph, targetId, collected);
 
 	const { nodes, edges } = buildSubgraphFromNodes(graph, collected);
 
@@ -565,7 +594,7 @@ function extractWalkGraph(
 		},
 		{
 			activeNodeIds: [...collected],
-			activeEdgeIds: edges.map((e) => e.id),
+			activeEdgeIds: allEdgeIds(edges),
 			selectedNodeIds: [positionId],
 		},
 	];

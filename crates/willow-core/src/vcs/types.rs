@@ -127,25 +127,18 @@ pub struct CommitEntry {
     pub data: CommitData,
 }
 
-pub fn remove_child(graph: &mut Graph, parent_id: &NodeId, child_id: &NodeId) {
+fn remove_child(graph: &mut Graph, parent_id: &NodeId, child_id: &NodeId) {
     if let Some(parent) = graph.nodes.get_mut(parent_id) {
         parent.children.retain(|c| c != child_id);
     }
 }
 
-pub fn add_child(graph: &mut Graph, parent_id: &NodeId, child_id: &NodeId) {
+fn add_child(graph: &mut Graph, parent_id: &NodeId, child_id: &NodeId) {
     if let Some(parent) = graph.nodes.get_mut(parent_id) {
         if !parent.children.contains(child_id) {
             parent.children.push(child_id.clone());
         }
     }
-}
-
-pub fn remove_node(graph: &mut Graph, node_id: &NodeId) {
-    if let Some(pid) = graph.nodes.get(node_id).and_then(|n| n.parent_id.clone()) {
-        remove_child(graph, &pid, node_id);
-    }
-    graph.nodes.remove(node_id);
 }
 
 /// Apply a delta's changes to a Graph in-place (forward replay).

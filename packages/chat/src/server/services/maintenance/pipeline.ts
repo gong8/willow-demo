@@ -1,18 +1,18 @@
 import { readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { resolve } from "node:path";
-import { createLogger } from "../../logger";
-import type { CrawlerSubtree } from "./crawler";
-import { spawnCrawlers } from "./crawler";
-import { runPreScan } from "./pre-scan";
-import { spawnResolver } from "./resolver";
+import { createLogger } from "../../logger.js";
+import type { CrawlerSubtree } from "./crawler.js";
+import { spawnCrawlers } from "./crawler.js";
+import { runPreScan } from "./pre-scan.js";
+import { spawnResolver } from "./resolver.js";
 import type {
 	GraphStats,
 	MaintenanceProgress,
 	MaintenanceReport,
 	ProgressCallback,
 	RawGraph,
-} from "./types";
+} from "./types.js";
 
 const log = createLogger("maintenance:pipeline");
 
@@ -20,7 +20,8 @@ function loadGraph(): RawGraph {
 	const graphPath =
 		process.env.WILLOW_GRAPH_PATH ??
 		resolve(homedir(), ".willow", "graph.json");
-	return JSON.parse(readFileSync(graphPath, "utf-8")) as RawGraph;
+	const raw = readFileSync(graphPath, "utf-8");
+	return JSON.parse(raw) as RawGraph;
 }
 
 function getGraphStats(graph: RawGraph): GraphStats {
@@ -32,9 +33,10 @@ function getGraphStats(graph: RawGraph): GraphStats {
 }
 
 function getTopLevelSubtrees(graph: RawGraph): CrawlerSubtree[] {
-	const root = graph.nodes[graph.root_id];
-	if (!root) return [];
-	return root.children.flatMap((childId) => {
+	const rootNode = graph.nodes[graph.root_id];
+	if (!rootNode) return [];
+
+	return rootNode.children.flatMap((childId) => {
 		const node = graph.nodes[childId];
 		return node ? [{ id: childId, content: node.content }] : [];
 	});
@@ -49,16 +51,6 @@ function buildGraphSummary(
 		return `- ${s.content} (${childCount} children)`;
 	});
 	return `Top-level categories:\n${lines.join("\n")}`;
-}
-
-function emptyReport(graphStats: GraphStats, start: number): MaintenanceReport {
-	return {
-		preScanFindings: [],
-		crawlerReports: [],
-		resolverActions: 0,
-		graphStats,
-		durationMs: Date.now() - start,
-	};
 }
 
 export async function runMaintenancePipeline(options: {
@@ -84,64 +76,84 @@ export async function runMaintenancePipeline(options: {
 		options.onProgress?.({ ...progress });
 	};
 
-	// Load graph
+	// Step 1: Load graph
 	let graph: RawGraph;
 	try {
 		graph = loadGraph();
 	} catch (e) {
 		log.error("Failed to load graph", { error: (e as Error).message });
-		return emptyReport({ nodeCount: 0, linkCount: 0, categoryCount: 0 }, start);
+		return {
+			preScanFindings: [],
+			crawlerReports: [],
+			resolverActions: 0,
+			graphStats: { nodeCount: 0, linkCount: 0, categoryCount: 0 },
+			durationMs: Date.now() - start,
+		};
 	}
 
 	const graphStats = getGraphStats(graph);
 	log.info("Graph loaded", { ...graphStats });
 
-	// Pre-scan (fast, no Claude)
+	// Step 2: Pre-scan (fast, no Claude)
 	const preScanFindings = runPreScan(graph);
 	log.info("Pre-scan complete", { findings: preScanFindings.length });
 
-	// Crawl subtrees
+	// Step 3: Identify subtrees for crawlers
 	const subtrees = getTopLevelSubtrees(graph);
-	let crawlerReports: Awaited<ReturnType<typeof spawnCrawlers>> = [];
-
-	if (subtrees.length > 0) {
-		const graphSummary = buildGraphSummary(graph, subtrees);
-		emitProgress({
-			phase: "crawling",
-			phaseLabel: `Crawling ${subtrees.length} categories...`,
-			crawlersTotal: subtrees.length,
-			crawlersComplete: 0,
-			phaseStartedAt: Date.now(),
-		});
-
-		log.info("Spawning crawlers", { count: subtrees.length });
-		crawlerReports = await spawnCrawlers({
-			subtrees,
-			mcpServerPath: options.mcpServerPath,
-			graphSummary,
-			preScanFindings,
-			onCrawlerComplete: () => {
-				progress.crawlersComplete++;
-				emitProgress({ crawlersComplete: progress.crawlersComplete });
-			},
-		});
-
-		log.info("All crawlers complete", {
-			reports: crawlerReports.length,
-			totalFindings: crawlerReports.reduce(
-				(sum, r) => sum + r.findings.length,
-				0,
-			),
-		});
-	} else {
+	if (subtrees.length === 0) {
 		log.info("No subtrees to crawl, skipping crawler phase");
+		const resolverActions =
+			preScanFindings.length > 0
+				? (
+						await spawnResolver({
+							preScanFindings,
+							crawlerReports: [],
+							mcpServerPath: options.mcpServerPath,
+						})
+					).actionsExecuted
+				: 0;
+
+		return {
+			preScanFindings,
+			crawlerReports: [],
+			resolverActions,
+			graphStats,
+			durationMs: Date.now() - start,
+		};
 	}
 
-	// Resolve findings
+	const graphSummary = buildGraphSummary(graph, subtrees);
+
+	// Step 4: Spawn crawlers in parallel
+	log.info("Spawning crawlers", { count: subtrees.length });
+	emitProgress({
+		phase: "crawling",
+		phaseLabel: `Crawling ${subtrees.length} categories...`,
+		crawlersTotal: subtrees.length,
+		crawlersComplete: 0,
+		phaseStartedAt: Date.now(),
+	});
+	const crawlerReports = await spawnCrawlers({
+		subtrees,
+		mcpServerPath: options.mcpServerPath,
+		graphSummary,
+		preScanFindings,
+		onCrawlerComplete: () => {
+			progress.crawlersComplete++;
+			emitProgress({ crawlersComplete: progress.crawlersComplete });
+		},
+	});
+
 	const totalCrawlerFindings = crawlerReports.reduce(
 		(sum, r) => sum + r.findings.length,
 		0,
 	);
+	log.info("All crawlers complete", {
+		reports: crawlerReports.length,
+		totalFindings: totalCrawlerFindings,
+	});
+
+	// Step 5: Spawn resolver if there are any findings
 	const totalFindings = preScanFindings.length + totalCrawlerFindings;
 	let resolverActions = 0;
 
@@ -153,8 +165,7 @@ export async function runMaintenancePipeline(options: {
 			resolverActions: 0,
 			phaseStartedAt: Date.now(),
 		});
-
-		const result = await spawnResolver({
+		const resolverResult = await spawnResolver({
 			preScanFindings,
 			crawlerReports,
 			mcpServerPath: options.mcpServerPath,
@@ -163,12 +174,11 @@ export async function runMaintenancePipeline(options: {
 				emitProgress({ resolverActions: progress.resolverActions });
 			},
 		});
-		resolverActions = result.actionsExecuted;
+		resolverActions = resolverResult.actionsExecuted;
 	} else {
 		log.info("No findings — skipping resolver");
 	}
 
-	// Commit
 	emitProgress({
 		phase: "committing",
 		phaseLabel: "Committing changes...",

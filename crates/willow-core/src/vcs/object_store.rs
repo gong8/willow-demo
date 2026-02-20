@@ -20,21 +20,40 @@ impl ObjectStore {
 
     /// Initialize the repo directory structure.
     pub fn init(&self) -> Result<(), WillowError> {
-        for kind in ["commits", "snapshots", "deltas"] {
-            std::fs::create_dir_all(self.repo_path.join("objects").join(kind))?;
+        for dir in [self.commits_dir(), self.snapshots_dir(), self.deltas_dir(), self.refs_heads_dir()] {
+            std::fs::create_dir_all(dir)?;
         }
-        std::fs::create_dir_all(self.refs_heads_dir())?;
         Ok(())
     }
 
     // ---- Path helpers ----
 
-    fn object_path(&self, kind: &str, name: &str) -> PathBuf {
-        self.repo_path.join("objects").join(kind).join(name)
+    fn object_dir(&self, kind: &str) -> PathBuf {
+        self.repo_path.join("objects").join(kind)
+    }
+
+    fn commits_dir(&self) -> PathBuf {
+        self.object_dir("commits")
+    }
+
+    fn snapshots_dir(&self) -> PathBuf {
+        self.object_dir("snapshots")
+    }
+
+    fn deltas_dir(&self) -> PathBuf {
+        self.object_dir("deltas")
     }
 
     fn refs_heads_dir(&self) -> PathBuf {
         self.repo_path.join("refs").join("heads")
+    }
+
+    fn head_path(&self) -> PathBuf {
+        self.repo_path.join("HEAD")
+    }
+
+    fn config_path(&self) -> PathBuf {
+        self.repo_path.join("config.json")
     }
 
     // ---- Generic JSON helpers ----
@@ -65,11 +84,11 @@ impl ObjectStore {
     // ---- Config ----
 
     pub fn write_config(&self, config: &RepoConfig) -> Result<(), WillowError> {
-        self.write_json(&self.repo_path.join("config.json"), config)
+        self.write_json(&self.config_path(), config)
     }
 
     pub fn read_config(&self) -> Result<RepoConfig, WillowError> {
-        self.read_json(&self.repo_path.join("config.json"))
+        self.read_json(&self.config_path())
     }
 
     // ---- HEAD ----
@@ -79,12 +98,12 @@ impl ObjectStore {
             HeadState::Branch(name) => format!("ref: refs/heads/{}", name),
             HeadState::Detached(hash) => hash.0.clone(),
         };
-        std::fs::write(self.repo_path.join("HEAD"), content)?;
+        std::fs::write(self.head_path(), content)?;
         Ok(())
     }
 
     pub fn read_head(&self) -> Result<HeadState, WillowError> {
-        let content = std::fs::read_to_string(self.repo_path.join("HEAD"))?;
+        let content = std::fs::read_to_string(self.head_path())?;
         let content = content.trim();
         if let Some(ref_path) = content.strip_prefix("ref: refs/heads/") {
             Ok(HeadState::Branch(ref_path.to_string()))
@@ -142,24 +161,27 @@ impl ObjectStore {
     /// Compute content-addressed hash for a commit.
     pub fn hash_commit(data: &CommitData) -> CommitHash {
         let serialized = serde_json::to_string(data).expect("CommitData serialization");
-        CommitHash(format!("{:x}", Sha256::digest(serialized.as_bytes())))
+        let mut hasher = Sha256::new();
+        hasher.update(serialized.as_bytes());
+        let result = hasher.finalize();
+        CommitHash(format!("{:x}", result))
     }
 
     pub fn write_commit(&self, hash: &CommitHash, data: &CommitData) -> Result<(), WillowError> {
-        debug!(%hash, "writing commit");
-        self.write_json(&self.object_path("commits", &hash.0), data)
+        debug!(hash = %hash.0, "writing commit");
+        self.write_json(&self.commits_dir().join(&hash.0), data)
     }
 
     pub fn read_commit(&self, hash: &CommitHash) -> Result<CommitData, WillowError> {
-        debug!(%hash, "reading commit");
-        self.read_json_or_not_found(&self.object_path("commits", &hash.0), hash)
+        debug!(hash = %hash.0, "reading commit");
+        self.read_json_or_not_found(&self.commits_dir().join(&hash.0), hash)
     }
 
     // ---- Snapshots (zstd compressed) ----
 
     pub fn write_snapshot(&self, hash: &CommitHash, graph: &Graph) -> Result<(), WillowError> {
-        debug!(%hash, "writing snapshot");
-        let path = self.object_path("snapshots", &hash.0);
+        debug!(hash = %hash.0, "writing snapshot");
+        let path = self.snapshots_dir().join(&hash.0);
         let json = serde_json::to_vec(graph)?;
         let compressed = zstd::encode_all(json.as_slice(), 3).map_err(WillowError::Io)?;
         std::fs::write(path, compressed)?;
@@ -167,8 +189,8 @@ impl ObjectStore {
     }
 
     pub fn read_snapshot(&self, hash: &CommitHash) -> Result<Graph, WillowError> {
-        debug!(%hash, "reading snapshot");
-        let path = self.object_path("snapshots", &hash.0);
+        debug!(hash = %hash.0, "reading snapshot");
+        let path = self.snapshots_dir().join(&hash.0);
         if !path.exists() {
             return Err(WillowError::VcsCommitNotFound(hash.0.clone()));
         }
@@ -181,13 +203,13 @@ impl ObjectStore {
     // ---- Deltas ----
 
     pub fn write_delta(&self, hash: &CommitHash, delta: &Delta) -> Result<(), WillowError> {
-        debug!(%hash, "writing delta");
-        self.write_json(&self.object_path("deltas", &hash.0), delta)
+        debug!(hash = %hash.0, "writing delta");
+        self.write_json(&self.deltas_dir().join(&hash.0), delta)
     }
 
     pub fn read_delta(&self, hash: &CommitHash) -> Result<Delta, WillowError> {
-        debug!(%hash, "reading delta");
-        self.read_json_or_not_found(&self.object_path("deltas", &hash.0), hash)
+        debug!(hash = %hash.0, "reading delta");
+        self.read_json_or_not_found(&self.deltas_dir().join(&hash.0), hash)
     }
 
     /// Resolve HEAD to a concrete commit hash.

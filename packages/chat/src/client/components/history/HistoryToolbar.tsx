@@ -1,12 +1,14 @@
 import { GitBranch } from "lucide-react";
 import type { BranchInfo } from "../../lib/api";
-import {
-	SOURCE_COLORS,
-	SOURCE_FILTERS,
-	type SourceFilter,
-} from "./sourceColors";
+import { SOURCE_COLORS } from "./sourceColors";
 
-export type { SourceFilter } from "./sourceColors";
+export type SourceFilter = "conversation" | "maintenance" | "manual";
+
+const SOURCE_FILTERS: { value: SourceFilter; label: string }[] = [
+	{ value: "conversation", label: "Conversation" },
+	{ value: "maintenance", label: "Maintenance" },
+	{ value: "manual", label: "Manual" },
+];
 
 export function HistoryToolbar({
 	branches,

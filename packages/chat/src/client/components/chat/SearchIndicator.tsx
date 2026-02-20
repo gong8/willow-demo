@@ -1,6 +1,6 @@
 import { Search } from "lucide-react";
-import { StatusIndicator } from "./StatusIndicator";
-import { SearchGraphViz } from "./graph-viz/SearchGraphViz";
+import { StatusIndicator } from "./StatusIndicator.js";
+import { SearchGraphViz } from "./graph-viz/SearchGraphViz.js";
 
 interface SearchToolCall {
 	toolCallId: string;

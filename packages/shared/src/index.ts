@@ -1,4 +1,4 @@
-export { schemas, CANONICAL_RELATIONS } from "./schemas";
+export { schemas, CANONICAL_RELATIONS } from "./schemas.js";
 export type {
 	CanonicalRelation,
 	CreateNodeInput,
@@ -10,4 +10,4 @@ export type {
 	GetContextInput,
 	DeleteNodeInput,
 	WalkGraphInput,
-} from "./schemas";
+} from "./schemas.js";

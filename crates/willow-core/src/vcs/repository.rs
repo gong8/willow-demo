@@ -131,23 +131,17 @@ impl Repository {
             .unwrap_or_default()
     }
 
-    fn require_branch_ref(&self, name: &str) -> Result<CommitHash, WillowError> {
-        self.store
-            .read_branch_ref(name)?
-            .ok_or_else(|| WillowError::BranchNotFound(name.to_string()))
-    }
-
-    fn require_current_branch(&self) -> Result<String, WillowError> {
-        self.current_branch()?
-            .ok_or(WillowError::VcsNotInitialized)
-    }
-
     fn merge_context(
         &self,
         source_branch: &str,
     ) -> Result<(String, CommitHash, CommitHash), WillowError> {
-        let current_branch_name = self.require_current_branch()?;
-        let source_hash = self.require_branch_ref(source_branch)?;
+        let current_branch_name = self
+            .current_branch()?
+            .ok_or(WillowError::VcsNotInitialized)?;
+        let source_hash = self
+            .store
+            .read_branch_ref(source_branch)?
+            .ok_or_else(|| WillowError::BranchNotFound(source_branch.to_string()))?;
         let target_hash = self.head_hash()?;
         Ok((current_branch_name, source_hash, target_hash))
     }
@@ -348,9 +342,9 @@ impl Repository {
         for name in branches {
             if let Some(hash) = self.store.read_branch_ref(&name)? {
                 result.push(BranchInfo {
-                    is_current: current.as_deref() == Some(&name),
-                    name,
+                    name: name.clone(),
                     head: hash,
+                    is_current: current.as_deref() == Some(&name),
                 });
             }
         }
@@ -380,7 +374,11 @@ impl Repository {
             return Err(WillowError::HasPendingChanges);
         }
 
-        let branch_hash = self.require_branch_ref(name)?;
+        let branch_hash = self
+            .store
+            .read_branch_ref(name)?
+            .ok_or_else(|| WillowError::BranchNotFound(name.to_string()))?;
+
         let graph = self.reconstruct_at(&branch_hash)?;
         self.store
             .write_head(&HeadState::Branch(name.to_string()))?;
@@ -390,14 +388,18 @@ impl Repository {
 
     /// Delete a branch.
     pub fn delete_branch(&self, name: &str) -> Result<(), WillowError> {
-        self.require_branch_ref(name)?;
+        if self.store.read_branch_ref(name)?.is_none() {
+            return Err(WillowError::BranchNotFound(name.to_string()));
+        }
 
         if name == self.config.default_branch {
             return Err(WillowError::CannotDeleteDefaultBranch(name.to_string()));
         }
 
-        if self.current_branch()?.as_deref() == Some(name) {
-            return Err(WillowError::CannotDeleteCurrentBranch(name.to_string()));
+        if let Some(current) = self.current_branch()? {
+            if current == name {
+                return Err(WillowError::CannotDeleteCurrentBranch(name.to_string()));
+            }
         }
 
         self.store.delete_branch_ref(name)?;

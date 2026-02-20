@@ -1,7 +1,7 @@
 import type { PrismaClient } from "@prisma/client";
-import { createLogger } from "../logger";
-import type { SSEEmitter, ToolCallData } from "./cli-chat";
-import { readSSEStream } from "./sse-codec";
+import { createLogger } from "../logger.js";
+import type { SSEEmitter, ToolCallData } from "./cli-chat.js";
+import { LineBuffer } from "./line-buffer.js";
 
 const log = createLogger("stream-manager");
 
@@ -20,6 +20,13 @@ export interface ActiveStream {
 	done: Promise<void>;
 }
 
+interface ParseState {
+	toolCallIndex: Map<string, number>;
+	searchActive: boolean;
+	indexerActive: boolean;
+	currentEventType: string;
+}
+
 function stripToolCallXml(text: string): string {
 	return text
 		.replace(/<tool_call>[\s\S]*?<\/tool_call>/g, "")
@@ -30,8 +37,6 @@ function stripToolCallXml(text: string): string {
 
 const CLEANUP_DELAY_MS = 60_000;
 const activeStreams = new Map<string, ActiveStream>();
-
-// -- Persistence --
 
 async function persistMessage(
 	db: PrismaClient,
@@ -72,6 +77,73 @@ async function safePersist(
 	}
 }
 
+function updateStreamState(
+	stream: ActiveStream,
+	state: ParseState,
+	eventType: string,
+	parsed: Record<string, unknown>,
+): void {
+	if (eventType === "search_phase") {
+		state.searchActive = parsed.status === "start";
+		return;
+	}
+	if (eventType === "indexer_phase") {
+		state.indexerActive = parsed.status === "start";
+		return;
+	}
+
+	if (eventType === "content" && parsed.content) {
+		stream.fullContent += parsed.content;
+		return;
+	}
+
+	if (eventType === "tool_call_start") {
+		const idx = stream.toolCallsData.length;
+		const phase = state.searchActive
+			? "search"
+			: state.indexerActive
+				? "indexer"
+				: "chat";
+		stream.toolCallsData.push({
+			toolCallId: parsed.toolCallId as string,
+			toolName: parsed.toolName as string,
+			args: {},
+			phase,
+		});
+		state.toolCallIndex.set(parsed.toolCallId as string, idx);
+		return;
+	}
+
+	const idx = state.toolCallIndex.get(parsed.toolCallId as string);
+	if (idx === undefined) return;
+
+	if (eventType === "tool_call_args") {
+		stream.toolCallsData[idx].args = parsed.args as Record<string, unknown>;
+	} else if (eventType === "tool_result") {
+		stream.toolCallsData[idx].result = parsed.result as string;
+		stream.toolCallsData[idx].isError = parsed.isError as boolean;
+	}
+}
+
+function parseSSELine(
+	line: string,
+	state: ParseState,
+): { type: string; data: string } | null {
+	const trimmed = line.trim();
+	if (!trimmed) return null;
+
+	if (trimmed.startsWith("event: ")) {
+		state.currentEventType = trimmed.slice(7);
+		return null;
+	}
+
+	if (!trimmed.startsWith("data: ")) return null;
+	const data = trimmed.slice(6);
+	const type = state.currentEventType;
+	state.currentEventType = "content";
+	return { type, data };
+}
+
 async function generateTitle(
 	db: PrismaClient,
 	conversationId: string,
@@ -82,6 +154,7 @@ async function generateTitle(
 		take: 2,
 		select: { role: true, content: true },
 	});
+	if (messages.length < 1) return null;
 	const userMsg = messages.find((m) => m.role === "user");
 	if (!userMsg) return null;
 	const title =
@@ -93,75 +166,6 @@ async function generateTitle(
 		data: { title },
 	});
 	return title;
-}
-
-// -- Stream state tracking --
-
-interface ToolCallTracker {
-	toolCallIndex: Map<string, number>;
-	searchActive: boolean;
-	indexerActive: boolean;
-}
-
-function processEvent(
-	stream: ActiveStream,
-	tracker: ToolCallTracker,
-	eventType: string,
-	parsed: Record<string, unknown>,
-): void {
-	if (eventType === "search_phase") {
-		tracker.searchActive = parsed.status === "start";
-		return;
-	}
-	if (eventType === "indexer_phase") {
-		tracker.indexerActive = parsed.status === "start";
-		return;
-	}
-	if (eventType === "content" && parsed.content) {
-		stream.fullContent += parsed.content;
-		return;
-	}
-	if (eventType === "tool_call_start") {
-		const idx = stream.toolCallsData.length;
-		const phase = tracker.searchActive
-			? "search"
-			: tracker.indexerActive
-				? "indexer"
-				: "chat";
-		stream.toolCallsData.push({
-			toolCallId: parsed.toolCallId as string,
-			toolName: parsed.toolName as string,
-			args: {},
-			phase,
-		});
-		tracker.toolCallIndex.set(parsed.toolCallId as string, idx);
-		return;
-	}
-
-	const idx = tracker.toolCallIndex.get(parsed.toolCallId as string);
-	if (idx === undefined) return;
-
-	if (eventType === "tool_call_args") {
-		stream.toolCallsData[idx].args = parsed.args as Record<string, unknown>;
-	} else if (eventType === "tool_result") {
-		stream.toolCallsData[idx].result = parsed.result as string;
-		stream.toolCallsData[idx].isError = parsed.isError as boolean;
-	}
-}
-
-// -- Stream lifecycle --
-
-function createEmitter(stream: ActiveStream): SSEEmitter {
-	return (event, data) => {
-		stream.events.push({ event, data });
-		for (const cb of stream.subscribers) {
-			try {
-				cb(event, data);
-			} catch {
-				log.warn("Subscriber error");
-			}
-		}
-	};
 }
 
 async function finalizeStream(
@@ -186,6 +190,12 @@ async function finalizeStream(
 	emit("done", "[DONE]");
 }
 
+function scheduleCleanup(conversationId: string): void {
+	setTimeout(() => {
+		activeStreams.delete(conversationId);
+	}, CLEANUP_DELAY_MS);
+}
+
 async function consumeStream(
 	stream: ActiveStream,
 	cliStream: ReadableStream<Uint8Array>,
@@ -193,27 +203,42 @@ async function consumeStream(
 	emit: SSEEmitter,
 	onComplete?: (fullContent: string) => void,
 ): Promise<void> {
-	const tracker: ToolCallTracker = {
+	const reader = cliStream.getReader();
+	const decoder = new TextDecoder();
+	const lineBuffer = new LineBuffer();
+	const state: ParseState = {
 		toolCallIndex: new Map(),
 		searchActive: false,
 		indexerActive: false,
+		currentEventType: "content",
 	};
 	let status: "complete" | "error" = "complete";
 
 	try {
-		await readSSEStream(cliStream, ({ type, data }) => {
-			if (data === "[DONE]") return;
-			try {
-				const obj = JSON.parse(data);
-				processEvent(stream, tracker, type, obj);
-				emit(type, JSON.stringify(obj));
-			} catch {
-				log.debug("SSE parse error");
+		for (;;) {
+			const { done, value } = await reader.read();
+			if (done) break;
+
+			for (const line of lineBuffer.push(
+				decoder.decode(value, { stream: true }),
+			)) {
+				const parsed = parseSSELine(line, state);
+				if (!parsed || parsed.data === "[DONE]") continue;
+
+				try {
+					const obj = JSON.parse(parsed.data);
+					updateStreamState(stream, state, parsed.type, obj);
+					emit(parsed.type, JSON.stringify(obj));
+				} catch {
+					log.debug("SSE parse error");
+				}
 			}
-		});
+		}
 	} catch {
 		log.error("Stream consumption error");
 		status = "error";
+	} finally {
+		reader.releaseLock();
 	}
 
 	await finalizeStream(stream, db, emit, status);
@@ -224,13 +249,21 @@ async function consumeStream(
 			log.warn("onComplete error");
 		}
 	}
-	setTimeout(
-		() => activeStreams.delete(stream.conversationId),
-		CLEANUP_DELAY_MS,
-	);
+	scheduleCleanup(stream.conversationId);
 }
 
-// -- Public API --
+function createEmitter(stream: ActiveStream): SSEEmitter {
+	return (event, data) => {
+		stream.events.push({ event, data });
+		for (const cb of stream.subscribers) {
+			try {
+				cb(event, data);
+			} catch {
+				log.warn("Subscriber error");
+			}
+		}
+	};
+}
 
 export function startStream(
 	conversationId: string,
@@ -283,7 +316,7 @@ export function subscribe(
 	if (!stream) return null;
 
 	let active = true;
-	let resolveDelivered!: () => void;
+	let resolveDelivered: () => void;
 	const delivered = new Promise<void>((resolve) => {
 		resolveDelivered = resolve;
 	});
@@ -305,7 +338,7 @@ export function subscribe(
 	if (stream.status === "streaming") {
 		stream.subscribers.add(forward);
 	} else {
-		resolveDelivered();
+		resolveDelivered!();
 	}
 
 	return {

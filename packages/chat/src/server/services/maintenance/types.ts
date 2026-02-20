@@ -1,12 +1,12 @@
 export type FindingSeverity = "critical" | "warning" | "suggestion";
 
-export type PreScanCategory =
+export type FindingCategory =
+	// pre-scan
 	| "broken_link"
 	| "orphan_node"
 	| "broken_parent"
-	| "expired_temporal";
-
-export type CrawlerCategory =
+	| "expired_temporal"
+	// crawler
 	| "non_canonical_relation"
 	| "misnamed_link"
 	| "missing_link"
@@ -22,8 +22,6 @@ export type CrawlerCategory =
 	| "overcrowded_category"
 	| "restructure"
 	| "enhancement";
-
-export type FindingCategory = PreScanCategory | CrawlerCategory;
 
 export interface Finding {
 	id: string;
@@ -58,15 +56,8 @@ export interface MaintenanceReport {
 	durationMs: number;
 }
 
-export type MaintenancePhase =
-	| "pre-scan"
-	| "crawling"
-	| "resolving"
-	| "committing"
-	| "done";
-
 export interface MaintenanceProgress {
-	phase: MaintenancePhase;
+	phase: "pre-scan" | "crawling" | "resolving" | "committing" | "done";
 	phaseLabel: string;
 	crawlersTotal: number;
 	crawlersComplete: number;
@@ -77,6 +68,7 @@ export interface MaintenanceProgress {
 
 export type ProgressCallback = (progress: MaintenanceProgress) => void;
 
+// Raw graph JSON types (matching graph.json structure)
 export interface RawGraph {
 	root_id: string;
 	nodes: Record<string, RawNode>;

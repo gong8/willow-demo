@@ -1,10 +1,10 @@
 import { useQuery } from "@tanstack/react-query";
 import { useMemo, useRef } from "react";
-import type { WillowGraph } from "../../../lib/graph-types";
-import { MiniGraphCanvas } from "./MiniGraphCanvas";
-import { extractSubgraph } from "./subgraph-extractors";
-import { type SubgraphData, fetchGraph } from "./types";
-import { useGraphAnimation } from "./useGraphAnimation";
+import type { WillowGraph } from "../../../lib/graph-types.js";
+import { MiniGraphCanvas } from "./MiniGraphCanvas.js";
+import { extractSubgraph } from "./subgraph-extractors.js";
+import { type SubgraphData, fetchGraph } from "./types.js";
+import { useGraphAnimation } from "./useGraphAnimation.js";
 
 const DIMMED_NODE_COLOR = "#d1d5db";
 const DIMMED_EDGE_COLOR = "#e5e7eb";
@@ -27,12 +27,11 @@ export function WillowToolViz({
 		queryFn: fetchGraph,
 	});
 
-	const subgraph = useMemo(
-		() => (graph ? extractSubgraph(toolName, graph, args, result) : null),
-		[graph, toolName, args, result],
-	);
+	const subgraph = useMemo(() => {
+		if (!graph) return null;
+		return extractSubgraph(toolName, graph, args, result);
+	}, [graph, toolName, args, result]);
 
-	// Keep the last valid subgraph visible during refetches
 	const subgraphRef = useRef<SubgraphData | null>(null);
 	if (subgraph) subgraphRef.current = subgraph;
 	const stable = subgraph ?? subgraphRef.current;

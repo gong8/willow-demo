@@ -16,14 +16,47 @@ import {
 	subscribe,
 } from "../services/stream-manager.js";
 import { db } from "./db.js";
-import { CHAT_SYSTEM_PROMPT } from "./system-prompt.js";
 
 const log = createLogger("chat");
 
+// Resolve the MCP server entry point
 const MCP_SERVER_PATH = resolve(
 	import.meta.dirname ?? ".",
 	"../../../../mcp-server/dist/index.js",
 );
+
+const CHAT_SYSTEM_PROMPT = `You are Willow, a personal knowledge assistant with persistent memory. You have access to a tree-structured knowledge graph that stores facts about the user across conversations.
+
+<memory_behavior>
+RECALLING FACTS:
+- Use search_memories to search your memory when the user asks about something you might know, or when recalling information would help your response.
+- For simple greetings or general chat, don't search.
+- You can search multiple times with different queries if needed.
+- Be transparent: "I remember you mentioned..." or "I don't have that in my memory yet."
+
+Memory updates happen automatically in the background — you don't need to store, update, or organize facts.
+</memory_behavior>
+
+<personality>
+- Be warm and conversational, like a thoughtful friend with a great memory
+- When you recall something, mention it naturally: "Oh, that reminds me — you mentioned..."
+- Be honest about what you do and don't remember
+- Keep responses concise unless the user wants detail
+</personality>
+
+<formatting>
+- Use markdown for formatting
+- Keep responses appropriately sized — short for simple facts, longer for complex discussions
+- Use bullet points for lists of remembered facts
+</formatting>
+
+<web_capabilities>
+You can search the web using WebSearch and fetch web pages using WebFetch when the user asks you to look something up, research a topic, or when real-time information would help. Use these proactively when the user's question benefits from current information.
+</web_capabilities>
+
+<resources>
+The user may have uploaded documents or saved URLs to their Resource Library. When they reference specific documents (e.g., "my resume", "that article"), use search_memories to check if the document has been indexed into the knowledge graph. If they attach a resource directly, its content will be provided below.
+</resources>`;
 
 const streamRequestSchema = z.object({
 	conversationId: z.string(),
@@ -47,12 +80,11 @@ chatRoutes.get("/conversations", async (c) => {
 			_count: { select: { messages: true } },
 		},
 	});
-	return c.json(
-		conversations.map(({ _count, ...rest }) => ({
-			...rest,
-			messageCount: _count.messages,
-		})),
-	);
+	const result = conversations.map(({ _count, ...rest }) => ({
+		...rest,
+		messageCount: _count.messages,
+	}));
+	return c.json(result);
 });
 
 // Create conversation
@@ -67,8 +99,9 @@ chatRoutes.post("/conversations", async (c) => {
 
 // Get messages
 chatRoutes.get("/conversations/:id/messages", async (c) => {
+	const { id } = c.req.param();
 	const messages = await db.message.findMany({
-		where: { conversationId: c.req.param("id") },
+		where: { conversationId: id },
 		orderBy: { createdAt: "asc" },
 		select: {
 			id: true,
@@ -86,7 +119,7 @@ chatRoutes.get("/conversations/:id/messages", async (c) => {
 
 // Delete conversation
 chatRoutes.delete("/conversations/:id", async (c) => {
-	const id = c.req.param("id");
+	const { id } = c.req.param();
 	await db.conversation.delete({ where: { id } });
 	log.info("Conversation deleted", { id });
 	return c.json({ ok: true });
@@ -94,7 +127,8 @@ chatRoutes.delete("/conversations/:id", async (c) => {
 
 // Stream status
 chatRoutes.get("/conversations/:id/stream-status", async (c) => {
-	const existing = getStream(c.req.param("id"));
+	const { id } = c.req.param();
+	const existing = getStream(id);
 	return c.json(
 		existing
 			? { active: true, status: existing.status }
@@ -104,9 +138,10 @@ chatRoutes.get("/conversations/:id/stream-status", async (c) => {
 
 // Reconnect to active stream
 chatRoutes.post("/conversations/:id/stream-reconnect", async (c) => {
-	const id = c.req.param("id");
+	const { id } = c.req.param();
 	log.info("Stream reconnect", { id });
-	if (!getStream(id)) {
+	const existingStream = getStream(id);
+	if (!existingStream) {
 		return c.json({ error: "No active stream" }, 404);
 	}
 	return pipeStreamToSSE(c, id);
@@ -114,7 +149,9 @@ chatRoutes.post("/conversations/:id/stream-reconnect", async (c) => {
 
 // Stream chat
 chatRoutes.post("/stream", async (c) => {
-	const parsed = streamRequestSchema.safeParse(await c.req.json());
+	const body = await c.req.json();
+	const parsed = streamRequestSchema.safeParse(body);
+
 	if (!parsed.success) {
 		return c.json({ error: parsed.error.flatten() }, 400);
 	}
@@ -212,8 +249,6 @@ chatRoutes.post("/maintenance/run", (c) => {
 	return c.json({ jobId: job.id });
 });
 
-// --- Helpers ---
-
 async function trimOrphanedMessages(
 	conversationId: string,
 	expectedPriorCount: number | undefined,
@@ -248,15 +283,16 @@ async function autoTitle(conversationId: string, message: string) {
 	});
 }
 
-function diskPaths(attachments: { diskPath: string | null }[]) {
-	return attachments
-		.map((a) => a.diskPath)
-		.filter((p): p is string => p !== null);
-}
+type HistoryRow = {
+	role: string;
+	content: string;
+	attachments: { diskPath: string | null }[];
+};
 
-function collectImagePaths(
-	history: { role: string; attachments: { diskPath: string | null }[] }[],
-) {
+function collectImagePaths(history: HistoryRow[]) {
+	const diskPaths = (atts: { diskPath: string | null }[]) =>
+		atts.map((a) => a.diskPath).filter((p): p is string => p !== null);
+
 	const allImagePaths = history.flatMap((msg) => diskPaths(msg.attachments));
 	const lastUserMsg = [...history].reverse().find((msg) => msg.role === "user");
 	const newImagePaths = lastUserMsg ? diskPaths(lastUserMsg.attachments) : [];

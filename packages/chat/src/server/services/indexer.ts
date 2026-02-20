@@ -1,5 +1,5 @@
-import { runAgent } from "./agent-runner";
-import type { SSEEmitter } from "./cli-chat";
+import { runAgent } from "./agent-runner.js";
+import type { SSEEmitter } from "./cli-chat.js";
 
 const INDEXER_SYSTEM_PROMPT = `You are a background knowledge-graph indexer. Your ONLY job is to analyze a conversation and update the user's knowledge graph with any new facts.
 

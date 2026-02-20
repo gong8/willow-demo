@@ -1,11 +1,11 @@
 import { serve } from "@hono/node-server";
 import { Hono } from "hono";
 import { cors } from "hono/cors";
-import { createLogger } from "./logger";
-import { chatRoutes } from "./routes/chat";
-import { attachmentRoutes } from "./routes/chat-attachments";
-import { graphRoutes } from "./routes/graph";
-import { resourceRoutes } from "./routes/resources";
+import { createLogger } from "./logger.js";
+import { attachmentRoutes } from "./routes/chat-attachments.js";
+import { chatRoutes } from "./routes/chat.js";
+import { graphRoutes } from "./routes/graph.js";
+import { resourceRoutes } from "./routes/resources.js";
 
 const log = createLogger("server");
 
@@ -24,10 +24,10 @@ serve({ fetch: app.fetch, port }, () => {
 	log.info("Willow API running", { port });
 });
 
-for (const event of ["unhandledRejection", "uncaughtException"] as const) {
-	process.on(event, (err: unknown) => {
-		log.error(event, {
-			error: String(err instanceof Error ? err.message : err),
-		});
-	});
-}
+process.on("unhandledRejection", (reason) => {
+	log.error("Unhandled rejection", { reason: String(reason) });
+});
+
+process.on("uncaughtException", (err) => {
+	log.error("Uncaught exception", { error: err.message });
+});

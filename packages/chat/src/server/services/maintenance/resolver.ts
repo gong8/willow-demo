@@ -16,7 +16,6 @@ import {
 	buildFixPassPrompt,
 	buildResolverSystemPrompt,
 	buildResolverUserPrompt,
-	countFindings,
 	needsSplitPasses,
 } from "./resolver-prompt.js";
 import type { CrawlerReport, Finding } from "./types.js";
@@ -108,10 +107,9 @@ export async function spawnResolver(options: {
 	mcpServerPath: string;
 	onAction?: () => void;
 }): Promise<ResolverResult> {
-	const totalFindings = countFindings(
-		options.preScanFindings,
-		options.crawlerReports,
-	);
+	const totalFindings =
+		options.preScanFindings.length +
+		options.crawlerReports.reduce((sum, r) => sum + r.findings.length, 0);
 
 	if (totalFindings === 0) {
 		log.info("No findings to resolve");

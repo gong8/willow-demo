@@ -33,45 +33,56 @@ IMPORTANT CONSTRAINTS:
 - Never attempt to use filesystem, code editing, web browsing, or any non-MCP tools.
 - When you need to perform multiple knowledge graph operations, make all tool calls in parallel within a single response.`;
 
-function formatFinding(f: Finding): string {
-	const lines = [`- [${f.id}] ${f.title}`, `  ${f.description}`];
-	if (f.suggestedAction) lines.push(`  Suggested: ${f.suggestedAction}`);
-	if (f.nodeIds.length > 0) lines.push(`  Nodes: ${f.nodeIds.join(", ")}`);
-	if (f.linkIds.length > 0) lines.push(`  Links: ${f.linkIds.join(", ")}`);
-	return lines.join("\n");
-}
-
 function formatFindings(findings: Finding[], header: string): string {
 	if (findings.length === 0) return "";
-	return `## ${header}\n\n${findings.map(formatFinding).join("\n\n")}\n`;
+	const items = findings
+		.map(
+			(f) =>
+				`- [${f.id}] ${f.title}\n  ${f.description}${f.suggestedAction ? `\n  Suggested: ${f.suggestedAction}` : ""}${f.nodeIds.length > 0 ? `\n  Nodes: ${f.nodeIds.join(", ")}` : ""}${f.linkIds.length > 0 ? `\n  Links: ${f.linkIds.join(", ")}` : ""}`,
+		)
+		.join("\n\n");
+	return `## ${header}\n\n${items}\n`;
 }
 
 export function buildResolverSystemPrompt(): string {
 	return RESOLVER_SYSTEM_PROMPT;
 }
 
-const CATEGORY_GROUP: Record<string, string> = {
-	non_canonical_relation: "link",
-	misnamed_link: "link",
-	redundant_link: "link",
-	low_confidence_link: "link",
-	wrong_direction: "link",
-	duplicate_node: "duplicate",
-	contradiction: "duplicate",
-	missing_link: "enhancement",
-	missing_temporal: "enhancement",
-	type_mismatch: "enhancement",
-	misplaced_node: "enhancement",
-	restructure: "enhancement",
-	enhancement: "enhancement",
-	expired_temporal: "cleanup",
-	vague_content: "cleanup",
-	overcrowded_category: "cleanup",
-};
+const LINK_FIX_CATEGORIES: Set<string> = new Set([
+	"non_canonical_relation",
+	"misnamed_link",
+	"redundant_link",
+	"low_confidence_link",
+	"wrong_direction",
+]);
+
+const DUPLICATE_CATEGORIES: Set<string> = new Set([
+	"duplicate_node",
+	"contradiction",
+]);
+
+const ENHANCEMENT_CATEGORIES: Set<string> = new Set([
+	"missing_link",
+	"missing_temporal",
+	"type_mismatch",
+	"misplaced_node",
+	"restructure",
+	"enhancement",
+]);
+
+const CLEANUP_CATEGORIES: Set<string> = new Set([
+	"expired_temporal",
+	"vague_content",
+	"overcrowded_category",
+]);
 
 function classifyFinding(f: Finding): string {
 	if (f.severity === "critical") return "critical";
-	return CATEGORY_GROUP[f.category] ?? "cleanup";
+	if (LINK_FIX_CATEGORIES.has(f.category)) return "link";
+	if (DUPLICATE_CATEGORIES.has(f.category)) return "duplicate";
+	if (ENHANCEMENT_CATEGORIES.has(f.category)) return "enhancement";
+	if (CLEANUP_CATEGORIES.has(f.category)) return "cleanup";
+	return "cleanup";
 }
 
 const SECTION_HEADERS: Record<string, string> = {
@@ -94,8 +105,7 @@ export function buildResolverUserPrompt(
 	const groups: Record<string, Finding[]> = {};
 	for (const f of allFindings) {
 		const key = classifyFinding(f);
-		if (!groups[key]) groups[key] = [];
-		groups[key].push(f);
+		(groups[key] ??= []).push(f);
 	}
 
 	const sections = Object.entries(SECTION_HEADERS)
@@ -112,22 +122,15 @@ export function buildResolverUserPrompt(
 	return `# Graph Maintenance Findings\n\n${summary}\n\n${sections.join("\n")}\nAddress each finding using the available tools. Work through them in priority order.`;
 }
 
-export function countFindings(
-	preScanFindings: Finding[],
-	crawlerReports: CrawlerReport[],
-): number {
-	return (
-		preScanFindings.length +
-		crawlerReports.reduce((sum, r) => sum + r.findings.length, 0)
-	);
-}
-
 /** Returns true if findings exceed 50, indicating need for split passes. */
 export function needsSplitPasses(
 	preScanFindings: Finding[],
 	crawlerReports: CrawlerReport[],
 ): boolean {
-	return countFindings(preScanFindings, crawlerReports) > 50;
+	const total =
+		preScanFindings.length +
+		crawlerReports.reduce((sum, r) => sum + r.findings.length, 0);
+	return total > 50;
 }
 
 function filterFindings(
