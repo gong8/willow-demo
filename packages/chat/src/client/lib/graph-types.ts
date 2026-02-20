@@ -16,7 +16,14 @@ export interface WillowNodeHistory {
 
 export interface WillowNode {
 	id: string;
-	node_type: "root" | "category" | "collection" | "entity" | "attribute" | "event" | "detail";
+	node_type:
+		| "root"
+		| "category"
+		| "collection"
+		| "entity"
+		| "attribute"
+		| "event"
+		| "detail";
 	content: string;
 	parent_id: string | null;
 	children: string[];
@@ -28,11 +35,10 @@ export interface WillowNode {
 
 export interface WillowLink {
 	id: string;
-	source_id: string;
-	target_id: string;
+	from_node: string;
+	to_node: string;
 	relation: string;
 	created_at: string;
-	metadata: Record<string, unknown>;
 }
 
 export interface WillowGraph {
@@ -67,7 +73,14 @@ export interface GraphStats {
 	relationTypes: string[];
 }
 
-export type NodeType = "root" | "category" | "collection" | "entity" | "attribute" | "event" | "detail";
+export type NodeType =
+	| "root"
+	| "category"
+	| "collection"
+	| "entity"
+	| "attribute"
+	| "event"
+	| "detail";
 export type LayoutType =
 	| "forceDirected2d"
 	| "circular2d"

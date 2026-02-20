@@ -51,6 +51,19 @@ graphRoutes.get("/", (c) => {
 	}
 });
 
+// GET /status — HEAD hash + whether there are uncommitted changes
+graphRoutes.get("/status", (c) => {
+	try {
+		const store = getStore();
+		const headHash = store.headHash() ?? null;
+		const hasLocalChanges = store.hasLocalChanges();
+		return c.json({ headHash, hasLocalChanges });
+	} catch (e: unknown) {
+		log.error("Failed to get status", { error: (e as Error).message });
+		return c.json({ headHash: null, hasLocalChanges: false });
+	}
+});
+
 // GET /log — commit history
 graphRoutes.get("/log", (c) => {
 	try {
@@ -179,15 +192,13 @@ graphRoutes.get("/at/:hash", (c) => {
 	try {
 		const store = getStore();
 		const hash = c.req.param("hash");
-		// Use showCommit to verify the commit exists, then reconstruct
-		// by checking out and reading the graph
-		store.showCommit(hash); // verify exists
-		// Return the diff info — the full graph at commit would require
-		// checkout which modifies state. For read-only, return the diff.
-		const detail = store.showCommit(hash);
-		return c.json(detail);
+		const graphJson = store.graphAtCommit(hash);
+		const graph = JSON.parse(graphJson);
+		return c.json(graph);
 	} catch (e: unknown) {
-		log.error("Failed to get commit state", { error: (e as Error).message });
+		log.error("Failed to get graph at commit", {
+			error: (e as Error).message,
+		});
 		return c.json({ error: (e as Error).message }, 404);
 	}
 });

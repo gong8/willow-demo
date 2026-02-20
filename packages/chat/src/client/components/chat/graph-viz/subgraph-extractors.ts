@@ -93,11 +93,11 @@ export function buildSubgraphFromNodes(
 
 	// Cross-link edges
 	for (const link of Object.values(graph.links)) {
-		if (nodeIds.has(link.source_id) && nodeIds.has(link.target_id)) {
+		if (nodeIds.has(link.from_node) && nodeIds.has(link.to_node)) {
 			edges.push({
 				id: `link__${link.id}`,
-				source: link.source_id,
-				target: link.target_id,
+				source: link.from_node,
+				target: link.to_node,
 				label: link.relation,
 				size: 2,
 				fill: LINK_COLORS[link.relation] ?? DEFAULT_LINK_COLOR,

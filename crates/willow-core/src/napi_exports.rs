@@ -595,6 +595,42 @@ impl JsGraphStore {
     }
 
     #[napi]
+    pub fn head_hash(&self) -> napi::Result<Option<String>> {
+        debug!("head_hash");
+        let repo = self.inner.get_repo().map_err(napi::Error::from)?;
+        let entries = repo.log(Some(1)).map_err(napi::Error::from)?;
+        Ok(entries.first().map(|e| e.hash.0.clone()))
+    }
+
+    #[napi]
+    pub fn has_local_changes(&self) -> napi::Result<bool> {
+        debug!("has_local_changes");
+        let repo = self.inner.get_repo().map_err(napi::Error::from)?;
+        let entries = repo.log(Some(1)).map_err(napi::Error::from)?;
+        let head = match entries.first() {
+            Some(e) => &e.hash,
+            None => return Ok(false),
+        };
+        let committed_graph = repo.reconstruct_at(head).map_err(napi::Error::from)?;
+        let diff = crate::vcs::diff::compute_graph_diff(&committed_graph, &self.inner.graph);
+        Ok(!diff.nodes_created.is_empty()
+            || !diff.nodes_updated.is_empty()
+            || !diff.nodes_deleted.is_empty()
+            || !diff.links_created.is_empty()
+            || !diff.links_removed.is_empty())
+    }
+
+    #[napi]
+    pub fn graph_at_commit(&self, hash: String) -> napi::Result<String> {
+        debug!(hash = %hash, "graph_at_commit");
+        let repo = self.inner.get_repo().map_err(napi::Error::from)?;
+        let graph = repo.reconstruct_at(&vcs::types::CommitHash(hash))
+            .map_err(napi::Error::from)?;
+        serde_json::to_string(&graph)
+            .map_err(|e| napi::Error::from_reason(e.to_string()))
+    }
+
+    #[napi]
     pub fn restore_to_commit(&mut self, hash: String) -> napi::Result<String> {
         info!(hash = %hash, "restore_to_commit");
         let new_hash = self

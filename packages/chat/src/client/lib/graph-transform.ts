@@ -100,15 +100,15 @@ export function transformGraphData(
 	let linkCount = 0;
 
 	for (const link of Object.values(graph.links)) {
-		if (!visibleIds.has(link.source_id) || !visibleIds.has(link.target_id))
+		if (!visibleIds.has(link.from_node) || !visibleIds.has(link.to_node))
 			continue;
 
 		relationTypes.add(link.relation);
 		linkCount++;
 		edges.push({
 			id: `link__${link.id}`,
-			source: link.source_id,
-			target: link.target_id,
+			source: link.from_node,
+			target: link.to_node,
 			label: link.relation,
 			size: 2,
 			fill: LINK_COLORS[link.relation] ?? DEFAULT_LINK_COLOR,

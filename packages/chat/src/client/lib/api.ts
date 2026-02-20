@@ -1,3 +1,5 @@
+import type { WillowGraph } from "./graph-types.js";
+
 const BASE_URL = "/api";
 
 export interface Conversation {
@@ -149,6 +151,16 @@ export interface BranchInfo {
 
 // --- VCS API functions ---
 
+export interface GraphStatus {
+	headHash: string | null;
+	hasLocalChanges: boolean;
+}
+
+export async function fetchGraphStatus(): Promise<GraphStatus> {
+	const res = await fetch(`${BASE_URL}/graph/status`);
+	return res.json();
+}
+
 export async function fetchCommitLog(limit = 50): Promise<CommitEntry[]> {
 	const res = await fetch(`${BASE_URL}/graph/log?limit=${limit}`);
 	return res.json();
@@ -172,6 +184,11 @@ export async function restoreToCommit(
 		headers: { "Content-Type": "application/json" },
 		body: JSON.stringify({ hash }),
 	});
+	return res.json();
+}
+
+export async function fetchGraphAtCommit(hash: string): Promise<WillowGraph> {
+	const res = await fetch(`${BASE_URL}/graph/at/${hash}`);
 	return res.json();
 }
 

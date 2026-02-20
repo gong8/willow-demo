@@ -18,7 +18,7 @@ export function NodeDetailPanel({
 
 	// Find links involving this node
 	const links = Object.values(graph.links).filter(
-		(l) => l.source_id === node.id || l.target_id === node.id,
+		(l) => l.from_node === node.id || l.to_node === node.id,
 	);
 
 	return (
@@ -83,7 +83,7 @@ export function NodeDetailPanel({
 						<ul className="space-y-1">
 							{links.map((link) => {
 								const otherId =
-									link.source_id === node.id ? link.target_id : link.source_id;
+									link.from_node === node.id ? link.to_node : link.from_node;
 								const otherNode = graph.nodes[otherId];
 								return (
 									<li key={link.id} className="text-sm text-muted-foreground">
