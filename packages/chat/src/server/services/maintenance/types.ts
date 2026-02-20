@@ -18,7 +18,7 @@ export type FindingCategory =
 	| "missing_temporal"
 	| "overcrowded_category"
 	| "restructure"
-	| "enrichment";
+	| "enhancement";
 
 export interface Finding {
 	id: string;
@@ -39,7 +39,7 @@ export interface CrawlerReport {
 	findings: Finding[];
 }
 
-export interface EnrichmentReport {
+export interface MaintenanceReport {
 	preScanFindings: Finding[];
 	crawlerReports: CrawlerReport[];
 	resolverActions: number;

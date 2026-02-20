@@ -30,7 +30,7 @@ vi.mock("../services/stream-manager.js", () => ({
 	subscribe: vi.fn(),
 }));
 
-vi.mock("../services/maintenance.js", () => ({
+vi.mock("../services/maintenance/index.js", () => ({
 	getMaintenanceStatus: vi.fn(() => ({ running: false })),
 	runMaintenance: vi.fn(() => ({ id: "job1" })),
 	notifyConversationComplete: vi.fn(),

@@ -49,7 +49,7 @@ type AgentName =
 	| "indexer"
 	| "maintenance"
 	| "crawler"
-	| "enricher";
+	| "resolver";
 
 /** Allowlist: each agent declares ONLY the willow tools it may use. */
 const AGENT_ALLOWED_TOOLS: Record<AgentName, readonly string[]> = {
@@ -72,7 +72,7 @@ const AGENT_ALLOWED_TOOLS: Record<AgentName, readonly string[]> = {
 		"mcp__willow__delete_link",
 	],
 	crawler: ["mcp__willow__search_nodes", "mcp__willow__get_context"],
-	enricher: [
+	resolver: [
 		"mcp__willow__search_nodes",
 		"mcp__willow__get_context",
 		"mcp__willow__create_node",

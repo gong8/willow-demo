@@ -12,7 +12,7 @@ import {
 	writeSystemPrompt,
 } from "../cli-chat.js";
 import {
-	buildEnrichPassPrompt,
+	buildEnhancementPassPrompt,
 	buildFixPassPrompt,
 	buildResolverSystemPrompt,
 	buildResolverUserPrompt,
@@ -53,7 +53,7 @@ function runResolverPass(options: {
 			mcpConfigPath,
 			"--strict-mcp-config",
 			"--disallowedTools",
-			...getDisallowedTools("enricher"),
+			...getDisallowedTools("resolver"),
 			"--append-system-prompt-file",
 			systemPromptPath,
 			"--setting-sources",
@@ -132,16 +132,16 @@ export async function spawnResolver(options: {
 			onAction: options.onAction,
 		});
 
-		// Pass 2: Enrichment suggestions
-		const enrichResult = await runResolverPass({
-			userPrompt: buildEnrichPassPrompt(options.crawlerReports),
+		// Pass 2: Enhancement suggestions
+		const enhancementResult = await runResolverPass({
+			userPrompt: buildEnhancementPassPrompt(options.crawlerReports),
 			mcpServerPath: options.mcpServerPath,
 			maxTurns: 25,
 			onAction: options.onAction,
 		});
 
 		return {
-			actionsExecuted: fixResult.actionsExecuted + enrichResult.actionsExecuted,
+			actionsExecuted: fixResult.actionsExecuted + enhancementResult.actionsExecuted,
 		};
 	}
 

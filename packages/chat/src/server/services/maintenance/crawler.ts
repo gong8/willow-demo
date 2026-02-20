@@ -86,7 +86,7 @@ RULES:
 - Be specific — include exact node IDs and link IDs in findings.
 - Be opinionated — if something could be better, report it.
 - Don't make changes — you are read-only. Just report findings.
-- Valid categories: misnamed_link, missing_link, redundant_link, duplicate_node, contradiction, misplaced_node, type_mismatch, vague_content, missing_temporal, overcrowded_category, restructure, enrichment
+- Valid categories: misnamed_link, missing_link, redundant_link, duplicate_node, contradiction, misplaced_node, type_mismatch, vague_content, missing_temporal, overcrowded_category, restructure, enhancement
 - Valid severities: critical, warning, suggestion`;
 }
 
@@ -121,7 +121,7 @@ function parseCrawlerReport(
 						(f: Record<string, unknown>) =>
 							({
 								id: f.id ?? "C?-???",
-								category: f.category ?? "enrichment",
+								category: f.category ?? "enhancement",
 								severity: f.severity ?? "suggestion",
 								source: `crawler:${subtreeRootId}`,
 								title: f.title ?? "",

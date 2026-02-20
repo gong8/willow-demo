@@ -82,16 +82,16 @@ vi.mock("../resolver.js", () => ({
 }));
 
 import { spawnCrawlers } from "../crawler.js";
-import { runEnrichment } from "../enricher.js";
+import { runMaintenancePipeline } from "../pipeline.js";
 import { spawnResolver } from "../resolver.js";
 
-describe("enricher orchestrator", () => {
+describe("maintenance pipeline", () => {
 	beforeEach(() => {
 		vi.clearAllMocks();
 	});
 
-	it("runs full enrichment pipeline", async () => {
-		const report = await runEnrichment({
+	it("runs full maintenance pipeline", async () => {
+		const report = await runMaintenancePipeline({
 			mcpServerPath: "/mcp",
 			trigger: "manual",
 		});
@@ -109,7 +109,7 @@ describe("enricher orchestrator", () => {
 	});
 
 	it("passes pre-scan findings to crawlers", async () => {
-		const report = await runEnrichment({
+		const report = await runMaintenancePipeline({
 			mcpServerPath: "/mcp",
 			trigger: "auto",
 		});
@@ -137,7 +137,7 @@ describe("enricher orchestrator", () => {
 			},
 		]);
 
-		const report = await runEnrichment({
+		const report = await runMaintenancePipeline({
 			mcpServerPath: "/mcp",
 			trigger: "manual",
 		});

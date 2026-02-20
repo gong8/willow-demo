@@ -10,7 +10,7 @@ import {
 	getMaintenanceStatus,
 	notifyConversationComplete,
 	runMaintenance,
-} from "../services/maintenance.js";
+} from "../services/maintenance/index.js";
 import {
 	getStream,
 	startStream,

@@ -2,10 +2,10 @@ import { randomUUID } from "node:crypto";
 import { homedir } from "node:os";
 import { resolve } from "node:path";
 import { JsGraphStore } from "@willow/core";
-import { createLogger } from "../logger.js";
-import type { ToolCallData } from "./cli-chat.js";
-import { runEnrichment } from "./enrichment/enricher.js";
-import type { MaintenanceProgress } from "./enrichment/types.js";
+import { createLogger } from "../../logger.js";
+import type { ToolCallData } from "../cli-chat.js";
+import { runMaintenancePipeline } from "./pipeline.js";
+import type { MaintenanceProgress } from "./types.js";
 
 const log = createLogger("maintenance");
 
@@ -74,11 +74,11 @@ export function runMaintenance(options: {
 		store.createBranch(branchName);
 		store.switchBranch(branchName);
 	} catch {
-		// If branching fails, fall through — enricher will still commit on whatever branch
+		// If branching fails, fall through — pipeline will still commit on whatever branch
 	}
 
-	// Run the multi-agent enrichment pipeline
-	runEnrichment({
+	// Run the multi-agent maintenance pipeline
+	runMaintenancePipeline({
 		mcpServerPath: options.mcpServerPath,
 		trigger: options.trigger,
 		onProgress: (progress) => {
@@ -102,7 +102,7 @@ export function runMaintenance(options: {
 				const store = JsGraphStore.open(graphPath);
 
 				const commitResult = store.commitExternalChanges({
-					message: `Maintenance: ${job.trigger} enrichment (${report.resolverActions} actions)`,
+					message: `Maintenance: ${job.trigger} (${report.resolverActions} actions)`,
 					source: "maintenance",
 					jobId: job.id,
 					conversationId: undefined,
@@ -111,7 +111,7 @@ export function runMaintenance(options: {
 				});
 
 				if (commitResult) {
-					log.info("Committed enrichment changes", { hash: commitResult });
+					log.info("Committed maintenance changes", { hash: commitResult });
 				}
 
 				// Merge maintenance branch back and clean up

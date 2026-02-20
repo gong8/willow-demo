@@ -9,12 +9,12 @@ import { runPreScan } from "./pre-scan.js";
 import { spawnResolver } from "./resolver.js";
 import type {
 	MaintenanceProgress,
-	EnrichmentReport,
+	MaintenanceReport,
 	ProgressCallback,
 	RawGraph,
 } from "./types.js";
 
-const log = createLogger("enricher");
+const log = createLogger("maintenance:pipeline");
 
 function loadGraph(): RawGraph {
 	const graphPath =
@@ -61,13 +61,13 @@ function buildGraphSummary(
 	return `Top-level categories:\n${lines.join("\n")}`;
 }
 
-export async function runEnrichment(options: {
+export async function runMaintenancePipeline(options: {
 	mcpServerPath: string;
 	trigger: "manual" | "auto";
 	onProgress?: ProgressCallback;
-}): Promise<EnrichmentReport> {
+}): Promise<MaintenanceReport> {
 	const start = Date.now();
-	log.info("Enrichment started", { trigger: options.trigger });
+	log.info("Pipeline started", { trigger: options.trigger });
 
 	const progress: MaintenanceProgress = {
 		phase: "pre-scan",
@@ -196,7 +196,7 @@ export async function runEnrichment(options: {
 		phaseStartedAt: Date.now(),
 	});
 
-	const report: EnrichmentReport = {
+	const report: MaintenanceReport = {
 		preScanFindings,
 		crawlerReports,
 		resolverActions,
@@ -204,7 +204,7 @@ export async function runEnrichment(options: {
 		durationMs: Date.now() - start,
 	};
 
-	log.info("Enrichment complete", {
+	log.info("Pipeline complete", {
 		preScan: preScanFindings.length,
 		crawlerFindings: totalCrawlerFindings,
 		resolverActions,

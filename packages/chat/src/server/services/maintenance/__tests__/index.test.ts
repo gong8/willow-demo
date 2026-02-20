@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-vi.mock("../enrichment/enricher.js", () => ({
-	runEnrichment: vi.fn(async (options: { onProgress?: (p: unknown) => void }) => {
+vi.mock("../pipeline.js", () => ({
+	runMaintenancePipeline: vi.fn(async (options: { onProgress?: (p: unknown) => void }) => {
 		options.onProgress?.({
 			phase: "done",
 			phaseLabel: "Maintenance complete",
@@ -41,7 +41,7 @@ import {
 	getMaintenanceStatus,
 	notifyConversationComplete,
 	runMaintenance,
-} from "../maintenance.js";
+} from "../index.js";
 
 describe("maintenance service", () => {
 	beforeEach(() => {

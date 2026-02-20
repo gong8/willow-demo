@@ -8,7 +8,7 @@ PRIORITIES:
 1. Fix critical structural issues first (broken links, orphans)
 2. Fix misnamed links (delete old link + add new link with correct relation)
 3. Resolve duplicates (keep the more detailed/recent node, delete the other)
-4. Apply enrichment (add temporal metadata, create missing links, restructure)
+4. Apply enhancements (add temporal metadata, create missing links, restructure)
 
 RULES:
 - To rename a link: use delete_link to remove the old one, then add_link
@@ -62,14 +62,14 @@ export function buildResolverUserPrompt(
 		(f) => f.category === "duplicate_node" || f.category === "contradiction",
 	);
 
-	const enrichment = allCrawlerFindings.filter(
+	const enhancements = allCrawlerFindings.filter(
 		(f) =>
 			f.category === "missing_link" ||
 			f.category === "missing_temporal" ||
 			f.category === "type_mismatch" ||
 			f.category === "misplaced_node" ||
 			f.category === "restructure" ||
-			f.category === "enrichment",
+			f.category === "enhancement",
 	);
 
 	const cleanup = [
@@ -90,7 +90,7 @@ export function buildResolverUserPrompt(
 			duplicatesAndContradictions,
 			"DUPLICATE/CONTRADICTION RESOLUTION",
 		),
-		formatFindings(enrichment, "ENRICHMENT OPPORTUNITIES"),
+		formatFindings(enhancements, "ENHANCEMENT OPPORTUNITIES"),
 		formatFindings(cleanup, "CLEANUP"),
 	].filter(Boolean);
 
@@ -103,7 +103,7 @@ export function buildResolverUserPrompt(
 		`Crawler findings: ${allCrawlerFindings.length}`,
 	].join(" | ");
 
-	return `# Graph Enrichment Findings\n\n${summary}\n\n${sections.join("\n")}\nAddress each finding using the available tools. Work through them in priority order.`;
+	return `# Graph Maintenance Findings\n\n${summary}\n\n${sections.join("\n")}\nAddress each finding using the available tools. Work through them in priority order.`;
 }
 
 /** Returns true if findings exceed 50, indicating need for split passes. */
@@ -138,8 +138,8 @@ export function buildFixPassPrompt(
 	);
 }
 
-/** Build user prompt for just the enrich pass (suggestions). */
-export function buildEnrichPassPrompt(crawlerReports: CrawlerReport[]): string {
+/** Build user prompt for just the enhancement pass (suggestions). */
+export function buildEnhancementPassPrompt(crawlerReports: CrawlerReport[]): string {
 	return buildResolverUserPrompt(
 		[],
 		crawlerReports.map((r) => ({
