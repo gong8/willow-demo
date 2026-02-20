@@ -245,6 +245,23 @@ function runSearchAgent(query) {
         if (!trimmed) continue;
         let msg;
         try { msg = JSON.parse(trimmed); } catch { continue; }
+
+        // Tool results arrive as top-level { type: "user" } messages, NOT as stream_events
+        if (msg.type === "user") {
+          const content = msg.message && msg.message.content;
+          if (Array.isArray(content)) {
+            for (const block of content) {
+              if (block.type === "tool_result") {
+                const tcId = "search__" + block.tool_use_id;
+                const result = typeof block.content === "string" ? block.content :
+                  Array.isArray(block.content) ? block.content.map(c => c.text || "").join("") : "";
+                sendToSocket("tool_result", JSON.stringify({ toolCallId: tcId, result, isError: block.is_error === true }));
+              }
+            }
+          }
+          continue;
+        }
+
         if (msg.type !== "stream_event") continue;
         const evt = msg.event;
         if (!evt) continue;
@@ -270,19 +287,6 @@ function runSearchAgent(query) {
             try { args = bm.argsJson ? JSON.parse(bm.argsJson) : {}; } catch {}
             sendToSocket("tool_call_args", JSON.stringify({ toolCallId: bm.id, toolName: bm.name, args }));
             blockMeta.delete(evt.index);
-          }
-        } else if (evt.type === "message_start" && evt.message && evt.message.role === "user") {
-          // Handle tool results from user messages
-          const content = evt.message.content;
-          if (Array.isArray(content)) {
-            for (const block of content) {
-              if (block.type === "tool_result") {
-                const tcId = "search__" + block.tool_use_id;
-                const result = typeof block.content === "string" ? block.content :
-                  Array.isArray(block.content) ? block.content.map(c => c.text || "").join("") : "";
-                sendToSocket("tool_result", JSON.stringify({ toolCallId: tcId, result, isError: block.is_error === true }));
-              }
-            }
           }
         }
       }

@@ -1,5 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
-import { useMemo, useRef, useState } from "react";
+import { useMemo } from "react";
 import type {
 	GraphEdge,
 	GraphNode,
@@ -8,10 +8,6 @@ import type {
 import { buildSubgraphFromNodes } from "./subgraph-extractors.js";
 
 const MAX_MERGED_NODES = 80;
-const DIMMED_COLOR = "#d1d5db";
-const EXPLORED_COLOR = "#b0b8c4";
-const DIMMED_EDGE_COLOR = "#e5e7eb";
-const EXPLORED_EDGE_COLOR = "#cbd5e1";
 
 interface SearchToolCall {
 	toolCallId: string;
@@ -28,12 +24,11 @@ async function fetchGraph(): Promise<WillowGraph> {
 
 export interface WalkStep {
 	toolCallId: string;
-	action: "start" | "down" | "up" | "done";
+	action: string;
 	positionId: string | null;
 	positionContent: string | null;
 	pathIds: string[];
 	childIds: string[];
-	allNodeIds: Set<string>;
 	status: "pending" | "settled";
 }
 
@@ -49,6 +44,7 @@ function parseWalkResult(result: unknown): {
 		pathIds: [] as string[],
 		childIds: [] as string[],
 	};
+	if (result == null) return empty;
 	try {
 		const parsed = typeof result === "string" ? JSON.parse(result) : result;
 		if (!parsed || typeof parsed !== "object") return empty;
@@ -86,22 +82,19 @@ export function useCumulativeSearchGraph(
 		queryFn: fetchGraph,
 	});
 
-	const [activeStepIndex, setActiveStepIndex] = useState(-1);
-	const prevCountRef = useRef(0);
-
-	// Step 1: Parse each walk_graph tool call into WalkStep and collect all visited node IDs
-	const { steps, mergedNodeIds } = useMemo(() => {
-		if (!graph)
-			return { steps: [] as WalkStep[], mergedNodeIds: new Set<string>() };
-
+	// Parse every tool call and accumulate all visited node IDs
+	const { steps, mergedNodeIds, latestSettledIndex } = useMemo(() => {
 		const steps: WalkStep[] = [];
 		const mergedNodeIds = new Set<string>();
+		let latestSettledIndex = -1;
+
+		if (!graph) return { steps, mergedNodeIds, latestSettledIndex };
 
 		for (const tc of toolCalls) {
-			const action = (tc.args.action as string) ?? "start";
+			const action = (tc.args?.action as string) ?? "start";
 			const hasResult = tc.result != null;
 
-			// "done" results are plain text ("Search complete."), not JSON
+			// "done" action result is plain text, not JSON
 			if (action === "done") {
 				steps.push({
 					toolCallId: tc.toolCallId,
@@ -110,167 +103,88 @@ export function useCumulativeSearchGraph(
 					positionContent: null,
 					pathIds: [],
 					childIds: [],
-					allNodeIds: new Set<string>(),
 					status: hasResult ? "settled" : "pending",
 				});
+				if (hasResult) latestSettledIndex = steps.length - 1;
 				continue;
 			}
 
 			if (hasResult) {
 				const { positionId, positionContent, pathIds, childIds } =
 					parseWalkResult(tc.result);
-				const allNodeIds = new Set<string>();
 				for (const id of pathIds) {
-					if (graph.nodes[id]) allNodeIds.add(id);
+					if (graph.nodes[id]) mergedNodeIds.add(id);
 				}
-				if (positionId && graph.nodes[positionId]) allNodeIds.add(positionId);
+				if (positionId && graph.nodes[positionId])
+					mergedNodeIds.add(positionId);
 				for (const id of childIds) {
-					if (graph.nodes[id]) allNodeIds.add(id);
+					if (graph.nodes[id]) mergedNodeIds.add(id);
 				}
-
-				for (const id of allNodeIds) mergedNodeIds.add(id);
 
 				steps.push({
 					toolCallId: tc.toolCallId,
-					action: action as WalkStep["action"],
+					action,
 					positionId,
 					positionContent,
 					pathIds,
 					childIds,
-					allNodeIds,
 					status: "settled",
 				});
+				latestSettledIndex = steps.length - 1;
 			} else {
-				// Pending — we know the action but not the result yet
 				steps.push({
 					toolCallId: tc.toolCallId,
-					action: action as WalkStep["action"],
+					action,
 					positionId: null,
 					positionContent: null,
 					pathIds: [],
 					childIds: [],
-					allNodeIds: new Set<string>(),
 					status: "pending",
 				});
 			}
 		}
 
-		// Cap at MAX_MERGED_NODES
+		// Cap merged nodes
 		if (mergedNodeIds.size > MAX_MERGED_NODES) {
 			const arr = [...mergedNodeIds];
 			mergedNodeIds.clear();
-			for (let i = 0; i < MAX_MERGED_NODES && i < arr.length; i++) {
+			for (let i = 0; i < MAX_MERGED_NODES; i++) {
 				mergedNodeIds.add(arr[i]);
 			}
 		}
 
-		return { steps, mergedNodeIds };
+		return { steps, mergedNodeIds, latestSettledIndex };
 	}, [graph, toolCalls]);
 
-	// Step 2: Build the merged graph from all visited nodes
-	const mergedGraph = useMemo(() => {
+	// Build the graph from all visited nodes
+	const subgraph = useMemo(() => {
 		if (!graph || mergedNodeIds.size < 2)
 			return { nodes: [] as GraphNode[], edges: [] as GraphEdge[] };
 		return buildSubgraphFromNodes(graph, mergedNodeIds);
 	}, [graph, mergedNodeIds]);
 
-	// Step 3: Determine active step
-	// When active step has no position data (done/pending), fall back to last
-	// settled step with position data so the graph always has highlights.
-	const effectiveIndex =
-		activeStepIndex === -1
-			? steps.length - 1
-			: Math.min(activeStepIndex, steps.length - 1);
-	const rawActiveStep =
-		effectiveIndex >= 0 ? steps[effectiveIndex] : undefined;
-
-	const activeStep = useMemo(() => {
-		if (rawActiveStep?.positionId) return rawActiveStep;
-		// Fall back: scan backwards for the last step with position data
-		for (let i = effectiveIndex - 1; i >= 0; i--) {
-			if (steps[i].positionId && steps[i].status === "settled") {
-				return steps[i];
-			}
+	// Find the last settled step with actual position data (skip "done" steps)
+	const displayStep = useMemo(() => {
+		for (let i = latestSettledIndex; i >= 0; i--) {
+			if (steps[i].positionId) return steps[i];
 		}
-		return rawActiveStep;
-	}, [rawActiveStep, steps, effectiveIndex]);
+		return null;
+	}, [steps, latestSettledIndex]);
 
-	// Step 4: Compute explored (prior steps) node IDs — everything seen before activeStep
-	const priorNodeIds = useMemo(() => {
-		const prior = new Set<string>();
-		if (!activeStep) return prior;
-		for (const s of steps) {
-			if (s === activeStep) break;
-			if (s.status === "settled") {
-				for (const id of s.allNodeIds) prior.add(id);
-			}
-		}
-		return prior;
-	}, [steps, activeStep]);
-
-	// Step 5: Compute display state — selected, active, explored, dimmed
-	const { displayNodes, displayEdges, selections, actives } = useMemo(() => {
-		if (!activeStep) {
-			return {
-				displayNodes: mergedGraph.nodes,
-				displayEdges: mergedGraph.edges,
-				selections: [] as string[],
-				actives: [] as string[],
-			};
-		}
-
-		const selectedIds = new Set<string>();
-		const activeIds = new Set<string>();
-
-		if (activeStep.positionId) selectedIds.add(activeStep.positionId);
-		for (const id of activeStep.pathIds) activeIds.add(id);
-		for (const id of activeStep.childIds) {
-			if (mergedNodeIds.has(id)) activeIds.add(id);
-		}
-		// Position is also active
-		if (activeStep.positionId) activeIds.add(activeStep.positionId);
-
-		const displayNodes: GraphNode[] = mergedGraph.nodes.map((n) => {
-			if (selectedIds.has(n.id)) return n;
-			if (activeIds.has(n.id)) return n;
-			if (priorNodeIds.has(n.id)) return { ...n, fill: EXPLORED_COLOR };
-			return { ...n, fill: DIMMED_COLOR };
-		});
-
-		const displayEdges: GraphEdge[] = mergedGraph.edges.map((e) => {
-			if (activeIds.has(e.source) && activeIds.has(e.target)) return e;
-			if (priorNodeIds.has(e.source) && priorNodeIds.has(e.target)) {
-				return { ...e, fill: EXPLORED_EDGE_COLOR };
-			}
-			return { ...e, fill: DIMMED_EDGE_COLOR };
-		});
-
-		const selections = [...selectedIds];
-
-		// Pulse the position node when step is pending
-		const actives: string[] =
-			activeStep.status === "pending" && activeStep.positionId
-				? [activeStep.positionId]
-				: [];
-
-		return { displayNodes, displayEdges, selections, actives };
-	}, [mergedGraph, activeStep, priorNodeIds, mergedNodeIds]);
-
-	// Auto-follow latest step when new tool calls arrive
-	if (toolCalls.length !== prevCountRef.current) {
-		prevCountRef.current = toolCalls.length;
-		if (activeStepIndex !== -1) {
-			setActiveStepIndex(-1);
-		}
-	}
+	// Highlight: selection = position node, no dimming — just show the whole graph
+	const selections = displayStep?.positionId ? [displayStep.positionId] : [];
+	const actives =
+		displayStep?.status === "pending" && displayStep.positionId
+			? [displayStep.positionId]
+			: [];
 
 	return {
-		nodes: displayNodes,
-		edges: displayEdges,
+		nodes: subgraph.nodes,
+		edges: subgraph.edges,
 		selections,
 		actives,
 		steps,
-		activeStepIndex: effectiveIndex,
-		setActiveStepIndex,
+		activeStepIndex: latestSettledIndex,
+		setActiveStepIndex: () => {},
 	};
 }

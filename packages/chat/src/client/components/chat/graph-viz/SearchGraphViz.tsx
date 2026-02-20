@@ -1,4 +1,3 @@
-import { useEffect, useRef, useState } from "react";
 import { MiniGraphCanvas } from "./MiniGraphCanvas.js";
 import {
 	type WalkStep,
@@ -17,7 +16,6 @@ function formatStepLabel(step: WalkStep): string {
 	if (step.action === "start") return "Root";
 	if (step.action === "done") return "\u2713";
 	if (step.action === "up") return "\u2191";
-	// "down" — show node content name, truncated
 	if (step.positionContent) {
 		const text = step.positionContent;
 		return text.length > 16 ? `${text.slice(0, 14)}\u2026` : text;
@@ -31,47 +29,15 @@ export function SearchGraphViz({
 }: {
 	toolCalls: SearchToolCall[];
 }) {
-	const {
-		nodes,
-		edges,
-		selections,
-		actives,
-		steps,
-		activeStepIndex,
-		setActiveStepIndex,
-	} = useCumulativeSearchGraph(toolCalls);
+	const { nodes, edges, selections, actives, steps, activeStepIndex } =
+		useCumulativeSearchGraph(toolCalls);
 
-	// IntersectionObserver for lazy WebGL loading
-	const containerRef = useRef<HTMLDivElement>(null);
-	const [isVisible, setIsVisible] = useState(false);
-
-	const shouldRender = nodes.length >= 2;
-
-	useEffect(() => {
-		if (!shouldRender) return;
-		const el = containerRef.current;
-		if (!el) return;
-
-		const observer = new IntersectionObserver(
-			([entry]) => {
-				if (entry.isIntersecting) {
-					setIsVisible(true);
-					observer.disconnect();
-				}
-			},
-			{ threshold: 0 },
-		);
-
-		observer.observe(el);
-		return () => observer.disconnect();
-	}, [shouldRender]);
-
-	if (!shouldRender) {
+	if (nodes.length < 2) {
 		return null;
 	}
 
 	return (
-		<div ref={containerRef} className="mt-1 space-y-1.5">
+		<div className="mt-1 space-y-1.5">
 			{/* Timeline strip */}
 			{steps.length > 1 && (
 				<div className="flex items-center gap-0.5 px-1 overflow-x-auto">
@@ -82,13 +48,11 @@ export function SearchGraphViz({
 
 						return (
 							<div key={step.toolCallId} className="flex items-center">
-								<button
-									type="button"
-									onClick={() => setActiveStepIndex(i)}
-									className={`flex items-center gap-1 rounded-full px-2 py-0.5 text-xs whitespace-nowrap transition-colors ${
+								<span
+									className={`flex items-center gap-1 rounded-full px-2 py-0.5 text-xs whitespace-nowrap ${
 										isActive
 											? "bg-blue-100 text-blue-700 dark:bg-blue-900/40 dark:text-blue-300"
-											: "bg-muted text-muted-foreground hover:bg-accent"
+											: "bg-muted text-muted-foreground"
 									}`}
 								>
 									<span
@@ -101,7 +65,7 @@ export function SearchGraphViz({
 										}`}
 									/>
 									{label}
-								</button>
+								</span>
 								{!isLast && (
 									<span className="text-muted-foreground/40 text-xs mx-0.5">
 										{"\u203A"}
@@ -113,16 +77,14 @@ export function SearchGraphViz({
 				</div>
 			)}
 
-			{/* Single canvas */}
-			{isVisible && (
-				<MiniGraphCanvas
-					nodes={nodes}
-					edges={edges}
-					selections={selections}
-					actives={actives}
-					height={240}
-				/>
-			)}
+			{/* Graph canvas — always render, no lazy loading */}
+			<MiniGraphCanvas
+				nodes={nodes}
+				edges={edges}
+				selections={selections}
+				actives={actives}
+				height={240}
+			/>
 		</div>
 	);
 }
