@@ -41,6 +41,12 @@ describe("stream-manager", () => {
 		vi.clearAllMocks();
 	});
 
+	function startControlled(id: string) {
+		const ctrl = controllableStream();
+		const stream = startStream(id, ctrl.readable, mockDb as any);
+		return { ...ctrl, stream };
+	}
+
 	it("starts a stream and gets it by id", () => {
 		const stream = startStream("conv-1", new ReadableStream(), mockDb as any);
 		expect(stream.status).toBe("streaming");
@@ -54,8 +60,7 @@ describe("stream-manager", () => {
 	});
 
 	it("subscribes to a stream and receives events", async () => {
-		const { readable, send, close } = controllableStream();
-		const stream = startStream("conv-3", readable, mockDb as any);
+		const { send, close, stream } = startControlled("conv-3");
 		const cb = vi.fn();
 		const handle = subscribe("conv-3", cb);
 		expect(handle).not.toBeNull();
@@ -78,8 +83,7 @@ describe("stream-manager", () => {
 	});
 
 	it("handles tool calls in stream parsing", async () => {
-		const { readable, send, close } = controllableStream();
-		const stream = startStream("conv-tc", readable, mockDb as any);
+		const { send, close, stream } = startControlled("conv-tc");
 
 		send("tool_call_start", '{"toolCallId":"t1","toolName":"search"}');
 		send("tool_call_args", '{"toolCallId":"t1","args":{"q":"test"}}');
@@ -107,8 +111,7 @@ describe("stream-manager", () => {
 	});
 
 	it("cleans up stream after completion delay", async () => {
-		const { readable, send, close } = controllableStream();
-		const stream = startStream("conv-cleanup", readable, mockDb as any);
+		const { send, close, stream } = startControlled("conv-cleanup");
 
 		send("done", "[DONE]");
 		close();

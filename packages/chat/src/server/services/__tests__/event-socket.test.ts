@@ -31,9 +31,8 @@ describe("event-socket", () => {
 		return { socket, received };
 	}
 
-	it("creates a unix socket and cleans it up", () => {
-		const socket = createEventSocket();
-		sockets.push(socket);
+	it("creates a unix socket with expected interface", () => {
+		const { socket } = setup();
 		expect(socket.socketPath).toContain("willow-evt-");
 		expect(typeof socket.cleanup).toBe("function");
 		expect(typeof socket.onEvent).toBe("function");

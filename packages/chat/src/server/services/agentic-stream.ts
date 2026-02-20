@@ -2,8 +2,11 @@ import { homedir } from "node:os";
 import { resolve } from "node:path";
 import { JsGraphStore } from "@willow/core";
 import { createLogger } from "../logger.js";
-import type { SSEEmitter } from "./cli-chat.js";
-import { type CliChatOptions, runChatAgent } from "./cli-chat.js";
+import {
+	type CliChatOptions,
+	type SSEEmitter,
+	runChatAgent,
+} from "./cli-chat.js";
 import { createEventSocket } from "./event-socket.js";
 import { runIndexerAgent } from "./indexer.js";
 
@@ -60,37 +63,12 @@ export function createAgenticStream(
 				controller.close();
 			};
 
-			// 1. Create event socket for sub-agent communication
 			const socket = createEventSocket();
-
-			// Forward all events from the socket (search phase markers, search__-prefixed tool calls)
-			// directly to the SSE stream. Data arrives already JSON-stringified.
-			socket.onEvent((event, data) => {
-				emit(event, data);
-			});
+			socket.onEvent(emit);
 
 			try {
 				log.info("Stream started", { conversationId });
-				// 2. Run chat agent with coordinator MCP enabled
 				let assistantText = "";
-
-				const chatEmitter: SSEEmitter = (event, data) => {
-					// Intercept content events to accumulate assistant text for the indexer
-					if (event === "content") {
-						try {
-							const parsed = JSON.parse(data);
-							if (parsed.content) {
-								assistantText += parsed.content as string;
-							}
-						} catch {
-							log.debug("Content parse error");
-						}
-					}
-					// Forward all events except "done" — we control the lifecycle
-					if (event !== "done") {
-						emit(event, data);
-					}
-				};
 
 				await runChatAgent(
 					{
@@ -100,7 +78,17 @@ export function createAgenticStream(
 							mcpServerPath,
 						},
 					},
-					chatEmitter,
+					(event, data) => {
+						if (event === "content") {
+							try {
+								const parsed = JSON.parse(data);
+								if (parsed.content) assistantText += parsed.content;
+							} catch {
+								log.debug("Content parse error");
+							}
+						}
+						if (event !== "done") emit(event, data);
+					},
 				);
 				log.info("Chat phase complete");
 

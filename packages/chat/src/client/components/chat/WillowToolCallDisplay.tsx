@@ -1,4 +1,5 @@
 import { type ToolCallMessagePartProps, useMessage } from "@assistant-ui/react";
+import type { ReactNode } from "react";
 import { useMemo } from "react";
 import type {
 	IndexerResultsPart,
@@ -9,156 +10,146 @@ import { SearchIndicator } from "./SearchIndicator.js";
 import { ToolCallDisplay } from "./ToolCallDisplay.js";
 import { WillowToolViz } from "./graph-viz/WillowToolViz.js";
 
-/** Set to true to show the text tool call labels alongside graph viz */
 const SHOW_TOOL_LABELS = false;
 
-function isSearchToolCall(toolCallId: string): boolean {
+export function isSearchToolCall(toolCallId: string): boolean {
 	return toolCallId.startsWith("search__");
 }
 
-function isIndexerToolCall(toolCallId: string): boolean {
+export function isIndexerToolCall(toolCallId: string): boolean {
 	return toolCallId.startsWith("indexer__");
 }
 
-/**
- * Renders the SearchIndicator for the first search tool call in the message.
- * Subsequent search tool calls return null (they're rendered inside the indicator).
- */
-function SearchToolCallHandler(props: ToolCallMessagePartProps) {
-	const content = useMessage((m) => m.content);
-	const metaSearchPart = useMessage(
-		(m) => m.metadata?.custom?.searchResults as SearchResultsPart | undefined,
-	);
-
-	const { isFirst, searchPart } = useMemo(() => {
-		let first: string | null = null;
-
-		for (const part of content) {
-			if (part.type === "tool-call" && isSearchToolCall(part.toolCallId)) {
-				if (!first) first = part.toolCallId;
-			}
-		}
-
-		// Check metadata for search results
-		if (metaSearchPart) {
-			return {
-				isFirst: first === props.toolCallId,
-				searchPart: metaSearchPart,
-			};
-		}
-
-		// Fallback: build from individual tool calls
-		const calls: SearchResultsPart["toolCalls"] = [];
-		for (const part of content) {
-			if (part.type === "tool-call" && isSearchToolCall(part.toolCallId)) {
-				calls.push({
-					toolCallId: part.toolCallId,
-					toolName: part.toolName,
-					args: part.args as Record<string, unknown>,
-					result: part.result as string | undefined,
-					isError: part.isError,
-				});
-			}
-		}
-
-		return {
-			isFirst: first === props.toolCallId,
-			searchPart:
-				calls.length > 0
-					? ({
-							type: "search-results",
-							searchStatus: "done",
-							toolCalls: calls,
-						} as SearchResultsPart)
-					: null,
-		};
-	}, [content, props.toolCallId, metaSearchPart]);
-
-	if (!isFirst || !searchPart) return null;
-
-	return (
-		<SearchIndicator
-			toolCalls={searchPart.toolCalls}
-			searchStatus={searchPart.searchStatus}
-		/>
-	);
-}
-
-/**
- * Renders the IndexerIndicator for the first indexer tool call in the message.
- * Subsequent indexer tool calls return null (they're rendered inside the indicator).
- */
-function IndexerToolCallHandler(props: ToolCallMessagePartProps) {
-	const content = useMessage((m) => m.content);
-	const metaIndexerPart = useMessage(
-		(m) => m.metadata?.custom?.indexerResults as IndexerResultsPart | undefined,
-	);
-
-	const { isFirst, indexerPart } = useMemo(() => {
-		let first: string | null = null;
-
-		for (const part of content) {
-			if (part.type === "tool-call" && isIndexerToolCall(part.toolCallId)) {
-				if (!first) first = part.toolCallId;
-			}
-		}
-
-		// Check metadata for indexer results
-		if (metaIndexerPart) {
-			return {
-				isFirst: first === props.toolCallId,
-				indexerPart: metaIndexerPart,
-			};
-		}
-
-		// Fallback: build from individual tool calls
-		const calls: IndexerResultsPart["toolCalls"] = [];
-		for (const part of content) {
-			if (part.type === "tool-call" && isIndexerToolCall(part.toolCallId)) {
-				calls.push({
-					toolCallId: part.toolCallId,
-					toolName: part.toolName,
-					args: part.args as Record<string, unknown>,
-					result: part.result as string | undefined,
-					isError: part.isError,
-				});
-			}
-		}
-
-		return {
-			isFirst: first === props.toolCallId,
-			indexerPart:
-				calls.length > 0
-					? ({
-							type: "indexer-results",
-							indexerStatus: "done",
-							toolCalls: calls,
-						} as IndexerResultsPart)
-					: null,
-		};
-	}, [content, props.toolCallId, metaIndexerPart]);
-
-	if (!isFirst || !indexerPart) return null;
-
-	return <IndexerIndicator part={indexerPart} />;
-}
-
-function isCoordinatorSearchTool(toolName: string): boolean {
+export function isCoordinatorSearchTool(toolName: string): boolean {
 	return toolName === "mcp__coordinator__search_memories";
 }
 
+interface ToolCallPart {
+	toolCallId: string;
+	toolName: string;
+	args: Record<string, unknown>;
+	result?: string;
+	isError?: boolean;
+}
+
+function useGroupedToolCalls<T extends { toolCalls: ToolCallPart[] }>(
+	props: ToolCallMessagePartProps,
+	filter: (toolCallId: string) => boolean,
+	metaSelector: (m: { metadata?: { custom?: Record<string, unknown> } }) =>
+		| T
+		| undefined,
+	buildFallback: (calls: ToolCallPart[]) => T | null,
+): { isFirst: boolean; part: T | null } {
+	const content = useMessage((m) => m.content);
+	const metaPart = useMessage(metaSelector as (m: unknown) => T | undefined);
+
+	return useMemo(() => {
+		let first: string | null = null;
+		for (const p of content) {
+			if (p.type === "tool-call" && filter(p.toolCallId)) {
+				if (!first) first = p.toolCallId;
+			}
+		}
+
+		if (metaPart) {
+			return { isFirst: first === props.toolCallId, part: metaPart };
+		}
+
+		const calls: ToolCallPart[] = [];
+		for (const p of content) {
+			if (p.type === "tool-call" && filter(p.toolCallId)) {
+				calls.push({
+					toolCallId: p.toolCallId,
+					toolName: p.toolName,
+					args: p.args as Record<string, unknown>,
+					result: p.result as string | undefined,
+					isError: p.isError,
+				});
+			}
+		}
+
+		return { isFirst: first === props.toolCallId, part: buildFallback(calls) };
+	}, [content, props.toolCallId, metaPart, filter, buildFallback]);
+}
+
+function GroupedHandler(
+	props: ToolCallMessagePartProps & {
+		filter: (id: string) => boolean;
+		metaSelector: (m: { metadata?: { custom?: Record<string, unknown> } }) =>
+			| SearchResultsPart
+			| IndexerResultsPart
+			| undefined;
+		buildFallback: (
+			calls: ToolCallPart[],
+		) => SearchResultsPart | IndexerResultsPart | null;
+		render: (part: SearchResultsPart | IndexerResultsPart) => ReactNode;
+	},
+) {
+	const { isFirst, part } = useGroupedToolCalls(
+		props,
+		props.filter,
+		props.metaSelector,
+		props.buildFallback,
+	);
+
+	if (!isFirst || !part) return null;
+	return <>{props.render(part)}</>;
+}
+
+const searchMetaSelector = (m: {
+	metadata?: { custom?: Record<string, unknown> };
+}) => m.metadata?.custom?.searchResults as SearchResultsPart | undefined;
+
+const searchFallback = (calls: ToolCallPart[]): SearchResultsPart | null =>
+	calls.length > 0
+		? { type: "search-results", searchStatus: "done", toolCalls: calls }
+		: null;
+
+const indexerMetaSelector = (m: {
+	metadata?: { custom?: Record<string, unknown> };
+}) => m.metadata?.custom?.indexerResults as IndexerResultsPart | undefined;
+
+const indexerFallback = (calls: ToolCallPart[]): IndexerResultsPart | null =>
+	calls.length > 0
+		? { type: "indexer-results", indexerStatus: "done", toolCalls: calls }
+		: null;
+
+const renderSearch = (part: SearchResultsPart | IndexerResultsPart) => (
+	<SearchIndicator
+		toolCalls={part.toolCalls}
+		searchStatus={(part as SearchResultsPart).searchStatus}
+	/>
+);
+
+const renderIndexer = (part: SearchResultsPart | IndexerResultsPart) => (
+	<IndexerIndicator part={part as IndexerResultsPart} />
+);
+
 export function WillowToolCallDisplay(props: ToolCallMessagePartProps) {
-	// Search-phase tool calls are grouped into a SearchIndicator
 	if (isSearchToolCall(props.toolCallId)) {
-		return <SearchToolCallHandler {...props} />;
+		return (
+			<GroupedHandler
+				{...props}
+				filter={isSearchToolCall}
+				metaSelector={searchMetaSelector}
+				buildFallback={searchFallback}
+				render={renderSearch}
+			/>
+		);
 	}
 
-	// Indexer-phase tool calls are grouped into an IndexerIndicator
 	if (isIndexerToolCall(props.toolCallId)) {
-		return <IndexerToolCallHandler {...props} />;
+		return (
+			<GroupedHandler
+				{...props}
+				filter={isIndexerToolCall}
+				metaSelector={indexerMetaSelector}
+				buildFallback={indexerFallback}
+				render={renderIndexer}
+			/>
+		);
 	}
 
-	// Hide the coordinator's search_memories tool — already visualized in SearchIndicator
 	if (isCoordinatorSearchTool(props.toolName)) {
 		return null;
 	}

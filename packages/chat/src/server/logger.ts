@@ -1,27 +1,18 @@
 type LogLevel = "debug" | "info" | "warn" | "error";
 
-const LEVEL_ORDER: Record<LogLevel, number> = {
-	debug: 0,
-	info: 1,
-	warn: 2,
-	error: 3,
-};
-
-const LEVEL_LABELS: Record<LogLevel, string> = {
+const LEVELS: LogLevel[] = ["debug", "info", "warn", "error"];
+const LABELS: Record<LogLevel, string> = {
 	debug: "DEBUG",
 	info: "INFO ",
 	warn: "WARN ",
 	error: "ERROR",
 };
 
-const currentLevel: LogLevel =
-	((process.env.LOG_LEVEL ?? "info").toLowerCase() as LogLevel) in LEVEL_ORDER
-		? ((process.env.LOG_LEVEL ?? "info").toLowerCase() as LogLevel)
-		: "info";
-
-function shouldLog(level: LogLevel): boolean {
-	return LEVEL_ORDER[level] >= LEVEL_ORDER[currentLevel];
-}
+const envLevel = (process.env.LOG_LEVEL ?? "info").toLowerCase();
+const currentLevel: LogLevel = LEVELS.includes(envLevel as LogLevel)
+	? (envLevel as LogLevel)
+	: "info";
+const currentLevelIdx = LEVELS.indexOf(currentLevel);
 
 function formatMessage(
 	level: LogLevel,
@@ -29,12 +20,10 @@ function formatMessage(
 	message: string,
 	data?: Record<string, unknown>,
 ): string {
-	const timestamp = new Date().toISOString();
-	const base = `${timestamp} ${LEVEL_LABELS[level]} [${module}] ${message}`;
-	if (data && Object.keys(data).length > 0) {
-		return `${base} ${JSON.stringify(data)}`;
-	}
-	return base;
+	const base = `${new Date().toISOString()} ${LABELS[level]} [${module}] ${message}`;
+	return data && Object.keys(data).length > 0
+		? `${base} ${JSON.stringify(data)}`
+		: base;
 }
 
 export interface Logger {
@@ -45,22 +34,18 @@ export interface Logger {
 }
 
 export function createLogger(module: string): Logger {
+	const make =
+		(level: LogLevel) => (message: string, data?: Record<string, unknown>) => {
+			if (LEVELS.indexOf(level) >= currentLevelIdx) {
+				const out = level === "error" ? console.error : console.log;
+				out(formatMessage(level, module, message, data));
+			}
+		};
+
 	return {
-		debug(message, data) {
-			if (shouldLog("debug"))
-				console.log(formatMessage("debug", module, message, data));
-		},
-		info(message, data) {
-			if (shouldLog("info"))
-				console.log(formatMessage("info", module, message, data));
-		},
-		warn(message, data) {
-			if (shouldLog("warn"))
-				console.log(formatMessage("warn", module, message, data));
-		},
-		error(message, data) {
-			if (shouldLog("error"))
-				console.error(formatMessage("error", module, message, data));
-		},
+		debug: make("debug"),
+		info: make("info"),
+		warn: make("warn"),
+		error: make("error"),
 	};
 }

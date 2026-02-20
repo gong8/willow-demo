@@ -7,8 +7,9 @@ import {
 import { ClipboardCopy, Pencil } from "lucide-react";
 import {
 	EnlargeableImage,
-	MessageTimestamp,
+	MessageActionBar,
 	actionButtonClass,
+	sameComponent,
 } from "./message-utils.js";
 
 function UserImagePart() {
@@ -34,29 +35,22 @@ export function UserMessage() {
 		<MessagePrimitive.Root className="group flex justify-end px-4 py-2">
 			<div className="flex flex-col items-end gap-1 max-w-[80%]">
 				<MessagePrimitive.Attachments
-					components={{
-						Image: UserMessageAttachment,
-						File: UserMessageAttachment,
-						Attachment: UserMessageAttachment,
-					}}
+					components={sameComponent(UserMessageAttachment)}
 				/>
 				<div className="rounded-2xl bg-primary px-4 py-2 text-primary-foreground">
 					<MessagePrimitive.Content components={{ Image: UserImagePart }} />
 				</div>
-				<div className="flex items-center gap-1.5 opacity-0 group-hover:opacity-100 transition-opacity">
-					<MessageTimestamp />
-					<ActionBarPrimitive.Root className="flex items-center gap-1">
-						<ActionBarPrimitive.Edit className={actionButtonClass}>
-							<Pencil className="h-4 w-4" />
-						</ActionBarPrimitive.Edit>
-						<ActionBarPrimitive.Copy
-							copiedDuration={2000}
-							className={actionButtonClass}
-						>
-							<ClipboardCopy className="h-4 w-4" />
-						</ActionBarPrimitive.Copy>
-					</ActionBarPrimitive.Root>
-				</div>
+				<MessageActionBar>
+					<ActionBarPrimitive.Edit className={actionButtonClass}>
+						<Pencil className="h-4 w-4" />
+					</ActionBarPrimitive.Edit>
+					<ActionBarPrimitive.Copy
+						copiedDuration={2000}
+						className={actionButtonClass}
+					>
+						<ClipboardCopy className="h-4 w-4" />
+					</ActionBarPrimitive.Copy>
+				</MessageActionBar>
 			</div>
 		</MessagePrimitive.Root>
 	);

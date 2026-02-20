@@ -48,70 +48,75 @@ export function buildResolverSystemPrompt(): string {
 	return RESOLVER_SYSTEM_PROMPT;
 }
 
+const LINK_FIX_CATEGORIES: Set<string> = new Set([
+	"non_canonical_relation",
+	"misnamed_link",
+	"redundant_link",
+	"low_confidence_link",
+	"wrong_direction",
+]);
+
+const DUPLICATE_CATEGORIES: Set<string> = new Set([
+	"duplicate_node",
+	"contradiction",
+]);
+
+const ENHANCEMENT_CATEGORIES: Set<string> = new Set([
+	"missing_link",
+	"missing_temporal",
+	"type_mismatch",
+	"misplaced_node",
+	"restructure",
+	"enhancement",
+]);
+
+const CLEANUP_CATEGORIES: Set<string> = new Set([
+	"expired_temporal",
+	"vague_content",
+	"overcrowded_category",
+]);
+
+function classifyFinding(f: Finding): string {
+	if (f.severity === "critical") return "critical";
+	if (LINK_FIX_CATEGORIES.has(f.category)) return "link";
+	if (DUPLICATE_CATEGORIES.has(f.category)) return "duplicate";
+	if (ENHANCEMENT_CATEGORIES.has(f.category)) return "enhancement";
+	if (CLEANUP_CATEGORIES.has(f.category)) return "cleanup";
+	return "cleanup";
+}
+
+const SECTION_HEADERS: Record<string, string> = {
+	critical: "CRITICAL FIXES (must address)",
+	link: "LINK FIXES",
+	duplicate: "DUPLICATE/CONTRADICTION RESOLUTION",
+	enhancement: "ENHANCEMENT OPPORTUNITIES",
+	cleanup: "CLEANUP",
+};
+
 export function buildResolverUserPrompt(
 	preScanFindings: Finding[],
 	crawlerReports: CrawlerReport[],
 ): string {
-	const allCrawlerFindings = crawlerReports.flatMap((r) => r.findings);
-
-	// Group findings by action type
-	const critical = [
-		...preScanFindings.filter((f) => f.severity === "critical"),
-		...allCrawlerFindings.filter((f) => f.severity === "critical"),
+	const allFindings = [
+		...preScanFindings,
+		...crawlerReports.flatMap((r) => r.findings),
 	];
 
-	const linkFixes = allCrawlerFindings.filter(
-		(f) =>
-			f.category === "non_canonical_relation" ||
-			f.category === "misnamed_link" ||
-			f.category === "redundant_link" ||
-			f.category === "low_confidence_link" ||
-			f.category === "wrong_direction",
-	);
+	const groups: Record<string, Finding[]> = {};
+	for (const f of allFindings) {
+		const key = classifyFinding(f);
+		(groups[key] ??= []).push(f);
+	}
 
-	const duplicatesAndContradictions = allCrawlerFindings.filter(
-		(f) => f.category === "duplicate_node" || f.category === "contradiction",
-	);
-
-	const enhancements = allCrawlerFindings.filter(
-		(f) =>
-			f.category === "missing_link" ||
-			f.category === "missing_temporal" ||
-			f.category === "type_mismatch" ||
-			f.category === "misplaced_node" ||
-			f.category === "restructure" ||
-			f.category === "enhancement",
-	);
-
-	const cleanup = [
-		...preScanFindings.filter(
-			(f) => f.severity !== "critical" && f.category === "expired_temporal",
-		),
-		...allCrawlerFindings.filter(
-			(f) =>
-				f.category === "vague_content" || f.category === "overcrowded_category",
-		),
-	];
-
-	// Build the prompt sections — skip empty sections
-	const sections = [
-		formatFindings(critical, "CRITICAL FIXES (must address)"),
-		formatFindings(linkFixes, "LINK FIXES"),
-		formatFindings(
-			duplicatesAndContradictions,
-			"DUPLICATE/CONTRADICTION RESOLUTION",
-		),
-		formatFindings(enhancements, "ENHANCEMENT OPPORTUNITIES"),
-		formatFindings(cleanup, "CLEANUP"),
-	].filter(Boolean);
-
-	const totalFindings = preScanFindings.length + allCrawlerFindings.length;
+	const sections = Object.entries(SECTION_HEADERS)
+		.map(([key, header]) => formatFindings(groups[key] ?? [], header))
+		.filter(Boolean);
 
 	const summary = [
-		`Total findings: ${totalFindings}`,
+		`Total findings: ${allFindings.length}`,
 		`Pre-scan: ${preScanFindings.length}`,
 		`Crawler reports: ${crawlerReports.length}`,
-		`Crawler findings: ${allCrawlerFindings.length}`,
+		`Crawler findings: ${allFindings.length - preScanFindings.length}`,
 	].join(" | ");
 
 	return `# Graph Maintenance Findings\n\n${summary}\n\n${sections.join("\n")}\nAddress each finding using the available tools. Work through them in priority order.`;

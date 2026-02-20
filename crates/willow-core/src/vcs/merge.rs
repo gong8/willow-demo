@@ -53,24 +53,21 @@ fn node_modified(node: &Node, base: &Node) -> bool {
     node.content != base.content || node.metadata != base.metadata
 }
 
-fn remove_child(graph: &mut Graph, parent_id: &NodeId, child_id: &NodeId) {
+fn modify_parent(graph: &mut Graph, parent_id: &NodeId, child_id: &NodeId, add: bool) {
     if let Some(parent) = graph.nodes.get_mut(parent_id) {
-        parent.children.retain(|c| c != child_id);
-    }
-}
-
-fn add_child(graph: &mut Graph, parent_id: &NodeId, child_id: &NodeId) {
-    if let Some(parent) = graph.nodes.get_mut(parent_id) {
-        if !parent.children.contains(child_id) {
-            parent.children.push(child_id.clone());
+        if add {
+            if !parent.children.contains(child_id) {
+                parent.children.push(child_id.clone());
+            }
+        } else {
+            parent.children.retain(|c| c != child_id);
         }
     }
 }
 
 fn remove_node(graph: &mut Graph, node_id: &NodeId) {
-    let parent_id = graph.nodes.get(node_id).and_then(|n| n.parent_id.clone());
-    if let Some(ref pid) = parent_id {
-        remove_child(graph, pid, node_id);
+    if let Some(pid) = graph.nodes.get(node_id).and_then(|n| n.parent_id.clone()) {
+        modify_parent(graph, &pid, node_id, false);
     }
     graph.nodes.remove(node_id);
 }
@@ -87,14 +84,13 @@ fn bfs_expand(
     other_visited: &HashSet<String>,
     read_parents: &dyn Fn(&CommitHash) -> Vec<CommitHash>,
 ) -> Option<CommitHash> {
-    if let Some(hash) = queue.pop_front() {
-        if other_visited.contains(&hash.0) {
-            return Some(hash);
-        }
-        for parent in read_parents(&hash) {
-            if visited.insert(parent.0.clone()) {
-                queue.push_back(parent);
-            }
+    let hash = queue.pop_front()?;
+    if other_visited.contains(&hash.0) {
+        return Some(hash);
+    }
+    for parent in read_parents(&hash) {
+        if visited.insert(parent.0.clone()) {
+            queue.push_back(parent);
         }
     }
     None
@@ -189,15 +185,32 @@ fn merge_deleted_nodes(
 }
 
 fn reparent_node(merged: &mut Graph, nid: &NodeId, new_parent_id: &Option<NodeId>) {
-    let old_parent_id = merged.nodes.get(nid).and_then(|n| n.parent_id.clone());
-    if let Some(ref old_pid) = old_parent_id {
-        remove_child(merged, old_pid, nid);
+    if let Some(old_pid) = merged.nodes.get(nid).and_then(|n| n.parent_id.clone()) {
+        modify_parent(merged, &old_pid, nid, false);
     }
     if let Some(node) = merged.nodes.get_mut(nid) {
         node.parent_id = new_parent_id.clone();
     }
     if let Some(ref new_pid) = new_parent_id {
-        add_child(merged, new_pid, nid);
+        modify_parent(merged, new_pid, nid, true);
+    }
+}
+
+enum ThreeWayChange<T> {
+    BothDiverged(T, T),
+    OnlyTheirs(T),
+    NoAction,
+}
+
+fn three_way_diff<T: PartialEq + Clone>(base: &T, ours: &T, theirs: &T) -> ThreeWayChange<T> {
+    let ours_changed = ours != base;
+    let theirs_changed = theirs != base;
+    if ours_changed && theirs_changed && ours != theirs {
+        ThreeWayChange::BothDiverged(ours.clone(), theirs.clone())
+    } else if theirs_changed && !ours_changed {
+        ThreeWayChange::OnlyTheirs(theirs.clone())
+    } else {
+        ThreeWayChange::NoAction
     }
 }
 
@@ -210,7 +223,7 @@ pub fn three_way_merge(base: &Graph, ours: &Graph, theirs: &Graph) -> MergeResul
     for (nid, node) in &theirs.nodes {
         if !base.nodes.contains_key(nid) && !ours.nodes.contains_key(nid) {
             if let Some(ref parent_id) = node.parent_id {
-                add_child(&mut merged, parent_id, nid);
+                modify_parent(&mut merged, parent_id, nid, true);
             }
             merged.nodes.insert(nid.clone(), node.clone());
         }
@@ -228,48 +241,46 @@ pub fn three_way_merge(base: &Graph, ours: &Graph, theirs: &Graph) -> MergeResul
             continue;
         };
 
-        let ours_changed = node_modified(ours_node, base_node);
-        let theirs_changed = node_modified(theirs_node, base_node);
-
-        if ours_changed && theirs_changed
-            && (ours_node.content != theirs_node.content
-                || ours_node.metadata != theirs_node.metadata)
-        {
-            conflicts.push(MergeConflict {
-                node_id: nid.clone(),
-                conflict_type: ConflictType::ContentConflict {
-                    base: base_node.content.clone(),
-                    ours: ours_node.content.clone(),
-                    theirs: theirs_node.content.clone(),
-                },
-            });
-        } else if theirs_changed && !ours_changed {
-            if let Some(node) = merged.nodes.get_mut(nid) {
-                node.content = theirs_node.content.clone();
-                node.metadata = theirs_node.metadata.clone();
+        let content_key = |n: &Node| (n.content.clone(), n.metadata.clone());
+        match three_way_diff(&content_key(base_node), &content_key(ours_node), &content_key(theirs_node)) {
+            ThreeWayChange::BothDiverged(_, _) => {
+                conflicts.push(MergeConflict {
+                    node_id: nid.clone(),
+                    conflict_type: ConflictType::ContentConflict {
+                        base: base_node.content.clone(),
+                        ours: ours_node.content.clone(),
+                        theirs: theirs_node.content.clone(),
+                    },
+                });
             }
+            ThreeWayChange::OnlyTheirs((content, metadata)) => {
+                if let Some(node) = merged.nodes.get_mut(nid) {
+                    node.content = content;
+                    node.metadata = metadata;
+                }
+            }
+            ThreeWayChange::NoAction => {}
         }
 
-        let ours_parent_changed = ours_node.parent_id != base_node.parent_id;
-        let theirs_parent_changed = theirs_node.parent_id != base_node.parent_id;
-
-        if ours_parent_changed && theirs_parent_changed
-            && ours_node.parent_id != theirs_node.parent_id
-        {
-            conflicts.push(MergeConflict {
-                node_id: nid.clone(),
-                conflict_type: ConflictType::StructuralConflict {
-                    base_parent: parent_id_or_empty(base_node),
-                    ours_parent: parent_id_or_empty(ours_node),
-                    theirs_parent: parent_id_or_empty(theirs_node),
-                },
-            });
-        } else if theirs_parent_changed && !ours_parent_changed {
-            reparent_node(&mut merged, nid, &theirs_node.parent_id);
+        match three_way_diff(&base_node.parent_id, &ours_node.parent_id, &theirs_node.parent_id) {
+            ThreeWayChange::BothDiverged(_, _) => {
+                conflicts.push(MergeConflict {
+                    node_id: nid.clone(),
+                    conflict_type: ConflictType::StructuralConflict {
+                        base_parent: parent_id_or_empty(base_node),
+                        ours_parent: parent_id_or_empty(ours_node),
+                        theirs_parent: parent_id_or_empty(theirs_node),
+                    },
+                });
+            }
+            ThreeWayChange::OnlyTheirs(new_parent) => {
+                reparent_node(&mut merged, nid, &new_parent);
+            }
+            ThreeWayChange::NoAction => {}
         }
     }
 
-    // 4. Links added by theirs
+    // 4. Merge links from theirs
     for (lid, link) in &theirs.links {
         if !base.links.contains_key(lid)
             && !ours.links.contains_key(lid)
@@ -279,10 +290,8 @@ pub fn three_way_merge(base: &Graph, ours: &Graph, theirs: &Graph) -> MergeResul
             merged.links.insert(lid.clone(), link.clone());
         }
     }
-
-    // Links removed by theirs
     for lid in base.links.keys() {
-        if !theirs.links.contains_key(lid) && ours.links.contains_key(lid) {
+        if !theirs.links.contains_key(lid) {
             merged.links.remove(lid);
         }
     }
@@ -318,88 +327,68 @@ mod tests {
     use chrono::Utc;
     use std::collections::HashMap;
 
-    fn base_graph() -> Graph {
-        let root_id = NodeId("root".to_string());
-        let n1_id = NodeId("n1".to_string());
-        let mut nodes = HashMap::new();
+    fn make_node(id: &str, content: &str, parent: Option<&str>, children: &[&str]) -> Node {
         let now = Utc::now();
+        Node {
+            id: NodeId(id.to_string()),
+            node_type: if parent.is_none() { NodeType::Root } else { NodeType::Detail },
+            content: content.to_string(),
+            parent_id: parent.map(|p| NodeId(p.to_string())),
+            children: children.iter().map(|c| NodeId(c.to_string())).collect(),
+            metadata: HashMap::new(),
+            previous_values: Vec::new(),
+            temporal: None,
+            created_at: now,
+            updated_at: now,
+        }
+    }
 
-        nodes.insert(
-            root_id.clone(),
-            Node {
-                id: root_id.clone(),
-                node_type: NodeType::Root,
-                content: "User".to_string(),
-                parent_id: None,
-                children: vec![n1_id.clone()],
-                metadata: HashMap::new(),
-                previous_values: Vec::new(),
-                temporal: None,
-                created_at: now,
-                updated_at: now,
-            },
-        );
-        nodes.insert(
-            n1_id.clone(),
-            Node {
-                id: n1_id.clone(),
-                node_type: NodeType::Detail,
-                content: "Base content".to_string(),
-                parent_id: Some(root_id.clone()),
-                children: Vec::new(),
-                metadata: HashMap::new(),
-                previous_values: Vec::new(),
-                temporal: None,
-                created_at: now,
-                updated_at: now,
-            },
-        );
+    fn add_node(graph: &mut Graph, node: Node) {
+        let nid = node.id.clone();
+        if let Some(ref pid) = node.parent_id {
+            modify_parent(graph, pid, &nid, true);
+        }
+        graph.nodes.insert(nid, node);
+    }
 
+    fn base_graph() -> Graph {
+        let mut nodes = HashMap::new();
+        nodes.insert(NodeId("root".to_string()), make_node("root", "User", None, &["n1"]));
+        nodes.insert(NodeId("n1".to_string()), make_node("n1", "Base content", Some("root"), &[]));
         Graph {
-            root_id,
+            root_id: NodeId("root".to_string()),
             nodes,
             links: HashMap::new(),
         }
     }
 
+    fn ch(s: &str) -> CommitHash {
+        CommitHash(s.to_string())
+    }
+
+    fn nid(s: &str) -> NodeId {
+        NodeId(s.to_string())
+    }
+
     #[test]
     fn test_find_merge_base_linear() {
-        // a <- b <- c
-        let a = CommitHash("a".to_string());
-        let b = CommitHash("b".to_string());
-        let c = CommitHash("c".to_string());
-
-        let parents = |h: &CommitHash| -> Vec<CommitHash> {
-            match h.0.as_str() {
-                "c" => vec![b.clone()],
-                "b" => vec![a.clone()],
-                "a" => vec![],
-                _ => vec![],
-            }
+        let (a, b, c) = (ch("a"), ch("b"), ch("c"));
+        let parents = |h: &CommitHash| match h.0.as_str() {
+            "c" => vec![b.clone()],
+            "b" => vec![a.clone()],
+            _ => vec![],
         };
-
-        let base = find_merge_base(&b, &c, &parents);
-        assert_eq!(base.unwrap().0, "b");
+        assert_eq!(find_merge_base(&b, &c, &parents).unwrap().0, "b");
     }
 
     #[test]
     fn test_find_merge_base_divergent() {
-        // a <- b (ours), a <- c (theirs)
-        let a = CommitHash("a".to_string());
-        let b = CommitHash("b".to_string());
-        let c = CommitHash("c".to_string());
-
-        let parents = |h: &CommitHash| -> Vec<CommitHash> {
-            match h.0.as_str() {
-                "b" => vec![a.clone()],
-                "c" => vec![a.clone()],
-                "a" => vec![],
-                _ => vec![],
-            }
+        let (a, b, c) = (ch("a"), ch("b"), ch("c"));
+        let parents = |h: &CommitHash| match h.0.as_str() {
+            "b" | "c" => vec![a.clone()],
+            _ => vec![],
         };
-
-        let base = find_merge_base(&b, &c, &parents);
-        assert_eq!(base.unwrap().0, "a");
+        assert_eq!(find_merge_base(&b, &c, &parents).unwrap().0, "a");
     }
 
     #[test]
@@ -408,58 +397,14 @@ mod tests {
         let mut ours = base.clone();
         let mut theirs = base.clone();
 
-        // Ours adds n2
-        let n2 = NodeId("n2".to_string());
-        ours.nodes.insert(
-            n2.clone(),
-            Node {
-                id: n2.clone(),
-                node_type: NodeType::Detail,
-                content: "Ours added".to_string(),
-                parent_id: Some(NodeId("root".to_string())),
-                children: Vec::new(),
-                metadata: HashMap::new(),
-                previous_values: Vec::new(),
-                temporal: None,
-                created_at: Utc::now(),
-                updated_at: Utc::now(),
-            },
-        );
-        ours.nodes
-            .get_mut(&NodeId("root".to_string()))
-            .unwrap()
-            .children
-            .push(n2);
-
-        // Theirs adds n3
-        let n3 = NodeId("n3".to_string());
-        theirs.nodes.insert(
-            n3.clone(),
-            Node {
-                id: n3.clone(),
-                node_type: NodeType::Detail,
-                content: "Theirs added".to_string(),
-                parent_id: Some(NodeId("root".to_string())),
-                children: Vec::new(),
-                metadata: HashMap::new(),
-                previous_values: Vec::new(),
-                temporal: None,
-                created_at: Utc::now(),
-                updated_at: Utc::now(),
-            },
-        );
-        theirs
-            .nodes
-            .get_mut(&NodeId("root".to_string()))
-            .unwrap()
-            .children
-            .push(n3);
+        add_node(&mut ours, make_node("n2", "Ours added", Some("root"), &[]));
+        add_node(&mut theirs, make_node("n3", "Theirs added", Some("root"), &[]));
 
         match three_way_merge(&base, &ours, &theirs) {
             MergeResult::Success(merged) => {
-                assert!(merged.nodes.contains_key(&NodeId("n2".to_string())));
-                assert!(merged.nodes.contains_key(&NodeId("n3".to_string())));
-                assert_eq!(merged.nodes.len(), 4); // root, n1, n2, n3
+                assert!(merged.nodes.contains_key(&nid("n2")));
+                assert!(merged.nodes.contains_key(&nid("n3")));
+                assert_eq!(merged.nodes.len(), 4);
             }
             other => panic!("Expected success, got {:?}", other),
         }
@@ -471,19 +416,14 @@ mod tests {
         let mut ours = base.clone();
         let mut theirs = base.clone();
 
-        let n1 = NodeId("n1".to_string());
-        ours.nodes.get_mut(&n1).unwrap().content = "Ours version".to_string();
-        theirs.nodes.get_mut(&n1).unwrap().content = "Theirs version".to_string();
+        ours.nodes.get_mut(&nid("n1")).unwrap().content = "Ours version".to_string();
+        theirs.nodes.get_mut(&nid("n1")).unwrap().content = "Theirs version".to_string();
 
         match three_way_merge(&base, &ours, &theirs) {
             MergeResult::Conflicts(conflicts) => {
                 assert_eq!(conflicts.len(), 1);
                 match &conflicts[0].conflict_type {
-                    ConflictType::ContentConflict {
-                        base: b,
-                        ours: o,
-                        theirs: t,
-                    } => {
+                    ConflictType::ContentConflict { base: b, ours: o, theirs: t } => {
                         assert_eq!(b, "Base content");
                         assert_eq!(o, "Ours version");
                         assert_eq!(t, "Theirs version");
@@ -501,15 +441,11 @@ mod tests {
         let ours = base.clone();
         let mut theirs = base.clone();
 
-        let n1 = NodeId("n1".to_string());
-        theirs.nodes.get_mut(&n1).unwrap().content = "Updated by theirs".to_string();
+        theirs.nodes.get_mut(&nid("n1")).unwrap().content = "Updated by theirs".to_string();
 
         match three_way_merge(&base, &ours, &theirs) {
             MergeResult::Success(merged) => {
-                assert_eq!(
-                    merged.nodes.get(&n1).unwrap().content,
-                    "Updated by theirs"
-                );
+                assert_eq!(merged.nodes.get(&nid("n1")).unwrap().content, "Updated by theirs");
             }
             other => panic!("Expected success, got {:?}", other),
         }
@@ -521,13 +457,12 @@ mod tests {
         let mut ours = base.clone();
         let mut theirs = base.clone();
 
-        let n1 = NodeId("n1".to_string());
-        ours.nodes.get_mut(&n1).unwrap().content = "Same change".to_string();
-        theirs.nodes.get_mut(&n1).unwrap().content = "Same change".to_string();
+        ours.nodes.get_mut(&nid("n1")).unwrap().content = "Same change".to_string();
+        theirs.nodes.get_mut(&nid("n1")).unwrap().content = "Same change".to_string();
 
         match three_way_merge(&base, &ours, &theirs) {
             MergeResult::Success(merged) => {
-                assert_eq!(merged.nodes.get(&n1).unwrap().content, "Same change");
+                assert_eq!(merged.nodes.get(&nid("n1")).unwrap().content, "Same change");
             }
             other => panic!("Expected success, got {:?}", other),
         }
@@ -539,22 +474,14 @@ mod tests {
         let mut ours = base.clone();
         let mut theirs = base.clone();
 
-        let n1 = NodeId("n1".to_string());
-        // Ours modifies
-        ours.nodes.get_mut(&n1).unwrap().content = "Modified".to_string();
-        // Theirs deletes
-        theirs.nodes.remove(&n1);
-        theirs
-            .nodes
-            .get_mut(&NodeId("root".to_string()))
-            .unwrap()
-            .children
-            .retain(|c| c != &n1);
+        ours.nodes.get_mut(&nid("n1")).unwrap().content = "Modified".to_string();
+        theirs.nodes.remove(&nid("n1"));
+        theirs.nodes.get_mut(&nid("root")).unwrap().children.retain(|c| c != &nid("n1"));
 
         match three_way_merge(&base, &ours, &theirs) {
             MergeResult::Conflicts(conflicts) => {
                 assert_eq!(conflicts.len(), 1);
-                matches!(&conflicts[0].conflict_type, ConflictType::DeleteModifyConflict { .. });
+                assert!(matches!(&conflicts[0].conflict_type, ConflictType::DeleteModifyConflict { .. }));
             }
             other => panic!("Expected conflicts, got {:?}", other),
         }
@@ -562,16 +489,11 @@ mod tests {
 
     #[test]
     fn test_is_ancestor() {
-        let a = CommitHash("a".to_string());
-        let b = CommitHash("b".to_string());
-        let c = CommitHash("c".to_string());
-
-        let parents = |h: &CommitHash| -> Vec<CommitHash> {
-            match h.0.as_str() {
-                "c" => vec![b.clone()],
-                "b" => vec![a.clone()],
-                _ => vec![],
-            }
+        let (a, b, c) = (ch("a"), ch("b"), ch("c"));
+        let parents = |h: &CommitHash| match h.0.as_str() {
+            "c" => vec![b.clone()],
+            "b" => vec![a.clone()],
+            _ => vec![],
         };
 
         assert!(is_ancestor(&a, &c, &parents));

@@ -38,82 +38,65 @@ function textResponse(text: string, isError?: boolean): ToolResult {
 	return result;
 }
 
-function withHandler<T>(
+function registerTool(
 	name: string,
-	logData: (input: T) => Record<string, unknown>,
-	fn: (input: T) => ToolResult,
-): (input: T) => Promise<ToolResult> {
-	return async (input: T) => {
+	description: string,
+	// biome-ignore lint/suspicious/noExplicitAny: schema types are validated by Zod at runtime
+	schema: Record<string, any>,
+	// biome-ignore lint/suspicious/noExplicitAny: input type is inferred from Zod schema at runtime
+	fn: (input: any) => ToolResult,
+) {
+	server.tool(name, description, schema, async (input) => {
 		try {
-			log.info(name, logData(input));
+			log.info(name, input as Record<string, unknown>);
 			return fn(input);
 		} catch (e) {
 			log.error(`${name} failed`, { error: (e as Error).message });
 			throw e;
 		}
-	};
+	});
 }
 
-server.tool(
+registerTool(
 	"search_nodes",
 	"Search the knowledge graph for nodes matching a query. Use this to find existing facts before creating new ones.",
 	schemas.searchNodes.shape,
-	withHandler(
-		"search_nodes",
-		({ query, maxResults }) => ({ query, maxResults: maxResults ?? 10 }),
-		({ query, maxResults }) => {
-			const results = store.searchNodes(query, maxResults ?? 10);
-			log.debug("search_nodes result", { count: results.length });
-			return jsonResponse(results);
-		},
-	),
+	({ query, maxResults }) => {
+		const results = store.searchNodes(query, maxResults ?? 10);
+		log.debug("search_nodes result", { count: results.length });
+		return jsonResponse(results);
+	},
 );
 
-server.tool(
+registerTool(
 	"get_context",
 	"Get a node with its ancestors (path to root) and descendants (up to depth). Use this to understand where a fact sits in the knowledge tree.",
 	schemas.getContext.shape,
-	withHandler(
-		"get_context",
-		({ nodeId, depth }) => ({ nodeId, depth: depth ?? 2 }),
-		({ nodeId, depth }) => jsonResponse(store.getContext(nodeId, depth ?? 2)),
-	),
+	({ nodeId, depth }) => jsonResponse(store.getContext(nodeId, depth ?? 2)),
 );
 
-server.tool(
+registerTool(
 	"create_node",
 	"Create a new node in the knowledge graph. Types: 'category' for top-level grouping, 'collection' for sub-groups, 'entity' for named things, 'attribute' for facts/properties, 'event' for time-bound occurrences, 'detail' for additional depth/elaboration. Always specify a parent node.",
 	schemas.createNode.shape,
-	withHandler(
-		"create_node",
-		(input) => ({ parentId: input.parentId, nodeType: input.nodeType }),
-		(input) => jsonResponse(store.createNode(input)),
-	),
+	(input) => jsonResponse(store.createNode(input)),
 );
 
-server.tool(
+registerTool(
 	"update_node",
 	"Update an existing node's content or metadata. When content changes, the old value is preserved in history with an optional reason.",
 	schemas.updateNode.shape,
-	withHandler(
-		"update_node",
-		(input) => ({ nodeId: input.nodeId }),
-		(input) => jsonResponse(store.updateNode(input)),
-	),
+	(input) => jsonResponse(store.updateNode(input)),
 );
 
-server.tool(
+registerTool(
 	"delete_node",
 	"Delete a node and all its descendants from the knowledge graph. Cannot delete the root node. Associated links are also removed.",
 	schemas.deleteNode.shape,
-	withHandler(
-		"delete_node",
-		({ nodeId }) => ({ nodeId }),
-		({ nodeId }) => {
-			store.deleteNode(nodeId);
-			return textResponse(`Deleted node ${nodeId} and all descendants.`);
-		},
-	),
+	({ nodeId }) => {
+		store.deleteNode(nodeId);
+		return textResponse(`Deleted node ${nodeId} and all descendants.`);
+	},
 );
 
 function formatWalkView(targetId: string): ToolResult {
@@ -235,54 +218,32 @@ function handleWalkAction(
 	return textResponse(`Unknown action: ${action}`, true);
 }
 
-server.tool(
+registerTool(
 	"walk_graph",
 	"Navigate the knowledge tree one step at a time. Use 'start' to begin at root, 'down' to enter a child, 'up' to backtrack to parent, 'follow_link' to follow a cross-cutting link to its other endpoint, 'done' to end. Returns the current position, path from root, children, and cross-cutting links.",
 	schemas.walkGraph.shape,
-	withHandler(
-		"walk_graph",
-		({ action, nodeId, linkId }) => ({ action, nodeId, linkId }),
-		({ action, nodeId, linkId }) => {
-			return handleWalkAction(action, nodeId, linkId);
-		},
-	),
+	({ action, nodeId, linkId }) => handleWalkAction(action, nodeId, linkId),
 );
 
-server.tool(
+registerTool(
 	"delete_link",
 	"Delete a link between two nodes by its link ID.",
 	schemas.deleteLink.shape,
-	withHandler(
-		"delete_link",
-		({ linkId }) => ({ linkId }),
-		({ linkId }) => jsonResponse(store.deleteLink(linkId)),
-	),
+	({ linkId }) => jsonResponse(store.deleteLink(linkId)),
 );
 
-server.tool(
+registerTool(
 	"add_link",
 	"Create a link between two nodes. The relation MUST be one of: 'related_to', 'contradicts', 'caused_by', 'leads_to', 'depends_on', 'similar_to', 'part_of', 'example_of', 'derived_from'. Non-canonical values will be rejected. Set bidirectional=true for symmetric relations like 'related_to' and 'similar_to'.",
 	schemas.addLink.shape,
-	withHandler(
-		"add_link",
-		(input) => ({
-			from: input.fromNode,
-			to: input.toNode,
-			relation: input.relation,
-		}),
-		(input) => jsonResponse(store.addLink(input)),
-	),
+	(input) => jsonResponse(store.addLink(input)),
 );
 
-server.tool(
+registerTool(
 	"update_link",
 	"Update a link's relation, directionality, or confidence. The relation MUST be one of: 'related_to', 'contradicts', 'caused_by', 'leads_to', 'depends_on', 'similar_to', 'part_of', 'example_of', 'derived_from'. Use to correct relation names, mark links as bidirectional, or set confidence levels.",
 	schemas.updateLink.shape,
-	withHandler(
-		"update_link",
-		(input) => ({ linkId: input.linkId }),
-		(input) => jsonResponse(store.updateLink(input)),
-	),
+	(input) => jsonResponse(store.updateLink(input)),
 );
 
 async function main() {

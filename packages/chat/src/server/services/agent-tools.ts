@@ -1,12 +1,3 @@
-/**
- * Centralized agent tool permission registry.
- *
- * Each agent declares ONLY the willow MCP tools it may use (allowlist).
- * The disallowed list is computed automatically: BLOCKED_BUILTIN_TOOLS + any
- * willow tools NOT in the agent's allowlist.
- */
-
-/** Claude CLI built-in tools that no agent should ever use. */
 export const BLOCKED_BUILTIN_TOOLS: string[] = [
 	"Bash",
 	"Read",
@@ -31,7 +22,6 @@ export const BLOCKED_BUILTIN_TOOLS: string[] = [
 	"ToolSearch",
 ];
 
-/** Every willow MCP tool — single source of truth. */
 const ALL_WILLOW_TOOLS = [
 	"mcp__willow__search_nodes",
 	"mcp__willow__get_context",
@@ -52,7 +42,17 @@ type AgentName =
 	| "crawler"
 	| "resolver";
 
-/** Allowlist: each agent declares ONLY the willow tools it may use. */
+const FULL_WRITE_TOOLS: readonly string[] = [
+	"mcp__willow__search_nodes",
+	"mcp__willow__get_context",
+	"mcp__willow__create_node",
+	"mcp__willow__update_node",
+	"mcp__willow__delete_node",
+	"mcp__willow__add_link",
+	"mcp__willow__update_link",
+	"mcp__willow__delete_link",
+];
+
 const AGENT_ALLOWED_TOOLS: Record<AgentName, readonly string[]> = {
 	chat: [],
 	search: ["mcp__willow__walk_graph"],
@@ -63,47 +63,21 @@ const AGENT_ALLOWED_TOOLS: Record<AgentName, readonly string[]> = {
 		"mcp__willow__delete_node",
 		"mcp__willow__add_link",
 	],
-	maintenance: [
-		"mcp__willow__search_nodes",
-		"mcp__willow__get_context",
-		"mcp__willow__create_node",
-		"mcp__willow__update_node",
-		"mcp__willow__delete_node",
-		"mcp__willow__add_link",
-		"mcp__willow__update_link",
-		"mcp__willow__delete_link",
-	],
+	maintenance: FULL_WRITE_TOOLS,
 	crawler: ["mcp__willow__search_nodes", "mcp__willow__get_context"],
-	resolver: [
-		"mcp__willow__search_nodes",
-		"mcp__willow__get_context",
-		"mcp__willow__create_node",
-		"mcp__willow__update_node",
-		"mcp__willow__delete_node",
-		"mcp__willow__add_link",
-		"mcp__willow__update_link",
-		"mcp__willow__delete_link",
-	],
+	resolver: FULL_WRITE_TOOLS,
 };
 
-/** Built-in tools that the chat agent is allowed to use (web browsing). */
-const CHAT_ALLOWED_BUILTINS = ["WebFetch", "WebSearch"];
+const CHAT_ALLOWED_BUILTINS = new Set(["WebFetch", "WebSearch"]);
 
-/**
- * Returns the full disallowed tools list for an agent:
- * BLOCKED_BUILTIN_TOOLS + any willow tools NOT in the agent's allowlist.
- * The chat agent additionally gets WebFetch/WebSearch unblocked.
- */
 export function getDisallowedTools(agent: AgentName): string[] {
 	const allowed = new Set(AGENT_ALLOWED_TOOLS[agent]);
 	const blockedWillow = ALL_WILLOW_TOOLS.filter((t) => !allowed.has(t));
 
-	let builtinBlocked = BLOCKED_BUILTIN_TOOLS;
-	if (agent === "chat") {
-		builtinBlocked = BLOCKED_BUILTIN_TOOLS.filter(
-			(t) => !CHAT_ALLOWED_BUILTINS.includes(t),
-		);
-	}
+	const builtinBlocked =
+		agent === "chat"
+			? BLOCKED_BUILTIN_TOOLS.filter((t) => !CHAT_ALLOWED_BUILTINS.has(t))
+			: BLOCKED_BUILTIN_TOOLS;
 
 	return [...builtinBlocked, ...blockedWillow];
 }

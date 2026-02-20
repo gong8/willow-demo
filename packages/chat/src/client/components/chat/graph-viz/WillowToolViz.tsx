@@ -1,10 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import { useMemo, useRef } from "react";
-import type {
-	GraphEdge,
-	GraphNode,
-	WillowGraph,
-} from "../../../lib/graph-types.js";
+import type { WillowGraph } from "../../../lib/graph-types.js";
 import { MiniGraphCanvas } from "./MiniGraphCanvas.js";
 import { extractSubgraph } from "./subgraph-extractors.js";
 import { type SubgraphData, fetchGraph } from "./types.js";
@@ -36,57 +32,29 @@ export function WillowToolViz({
 		return extractSubgraph(toolName, graph, args, result);
 	}, [graph, toolName, args, result]);
 
-	// Keep last valid subgraph so the graph never disappears once shown
 	const subgraphRef = useRef<SubgraphData | null>(null);
-	if (subgraph) {
-		subgraphRef.current = subgraph;
-	}
-	const stableSubgraph = subgraph ?? subgraphRef.current;
+	if (subgraph) subgraphRef.current = subgraph;
+	const stable = subgraph ?? subgraphRef.current;
 
-	const phases = stableSubgraph?.phases ?? [];
-	const animation = useGraphAnimation(phases);
+	const animation = useGraphAnimation(stable?.phases ?? []);
 
-	// Apply dimming: inactive nodes/edges are greyed out, active ones keep real colors
-	const { displayNodes, displayEdges, selections } = useMemo(() => {
-		if (!stableSubgraph) {
-			return {
-				displayNodes: [] as GraphNode[],
-				displayEdges: [] as GraphEdge[],
-				selections: [] as string[],
-			};
-		}
+	if (!stable || stable.nodes.length < 2 || isError) return null;
 
-		const nodes: GraphNode[] = stableSubgraph.nodes.map((n) => ({
-			...n,
-			fill: animation.activeNodeIds.has(n.id) ? n.fill : DIMMED_NODE_COLOR,
-		}));
-
-		const edges: GraphEdge[] = stableSubgraph.edges.map((e) => ({
-			...e,
-			fill: animation.activeEdgeIds.has(e.id) ? e.fill : DIMMED_EDGE_COLOR,
-		}));
-
-		return {
-			displayNodes: nodes,
-			displayEdges: edges,
-			selections: [...animation.selectedNodeIds],
-		};
-	}, [stableSubgraph, animation]);
-
-	const shouldRender =
-		!!stableSubgraph && stableSubgraph.nodes.length >= 2 && !isError;
-
-	if (!shouldRender) {
-		return null;
-	}
+	const displayNodes = stable.nodes.map((n) => ({
+		...n,
+		fill: animation.activeNodeIds.has(n.id) ? n.fill : DIMMED_NODE_COLOR,
+	}));
+	const displayEdges = stable.edges.map((e) => ({
+		...e,
+		fill: animation.activeEdgeIds.has(e.id) ? e.fill : DIMMED_EDGE_COLOR,
+	}));
 
 	return (
 		<div className="mt-1 min-h-[4px]">
-			{/* Graph canvas — always render, no lazy loading */}
 			<MiniGraphCanvas
 				nodes={displayNodes}
 				edges={displayEdges}
-				selections={selections}
+				selections={[...animation.selectedNodeIds]}
 			/>
 		</div>
 	);

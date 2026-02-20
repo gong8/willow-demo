@@ -9,12 +9,11 @@ function formatStepLabel(step: WalkStep): string {
 	if (step.action === "start") return "Root";
 	if (step.action === "done") return "\u2713";
 	if (step.action === "up") return "\u2191";
-	if (step.positionContent) {
-		const text = step.positionContent;
-		return text.length > 16 ? `${text.slice(0, 14)}\u2026` : text;
-	}
-	if (step.status === "pending") return "\u2026";
-	return "...";
+	if (step.positionContent)
+		return step.positionContent.length > 16
+			? `${step.positionContent.slice(0, 14)}\u2026`
+			: step.positionContent;
+	return step.status === "pending" ? "\u2026" : "...";
 }
 
 export function SearchGraphViz({
@@ -31,7 +30,6 @@ export function SearchGraphViz({
 
 	return (
 		<div className="mt-1 space-y-1.5">
-			{/* Timeline strip */}
 			{steps.length > 1 && (
 				<div className="flex items-center gap-0.5 px-1 overflow-x-auto">
 					{steps.map((step, i) => {
@@ -70,7 +68,6 @@ export function SearchGraphViz({
 				</div>
 			)}
 
-			{/* Graph canvas — always render, no lazy loading */}
 			<MiniGraphCanvas
 				nodes={nodes}
 				edges={edges}

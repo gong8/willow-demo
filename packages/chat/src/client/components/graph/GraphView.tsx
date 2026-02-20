@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { GraphCanvas } from "reagraph";
 import { transformGraphData } from "../../lib/graph-transform.js";
 import type {
+	GraphStats,
 	LayoutType,
 	NodeType,
 	WillowGraph,
@@ -28,9 +29,16 @@ async function fetchGraph(): Promise<WillowGraph> {
 	return res.json();
 }
 
-export function GraphView({
-	activeConversationId: _activeConversationId,
-}: { activeConversationId: string | null }) {
+const EMPTY_STATS: GraphStats = {
+	nodeCount: 0,
+	linkCount: 0,
+	treeEdgeCount: 0,
+	nodesByType: {},
+	relationTypes: [],
+	linksByRelation: {},
+};
+
+export function GraphView(_props: { activeConversationId: string | null }) {
 	const { data: graph } = useQuery<WillowGraph>({
 		queryKey: ["graph"],
 		queryFn: fetchGraph,
@@ -77,18 +85,7 @@ export function GraphView({
 
 	const { nodes, edges, stats } = useMemo(() => {
 		if (!graph) {
-			return {
-				nodes: [],
-				edges: [],
-				stats: {
-					nodeCount: 0,
-					linkCount: 0,
-					treeEdgeCount: 0,
-					nodesByType: {},
-					relationTypes: [],
-					linksByRelation: {},
-				},
-			};
+			return { nodes: [], edges: [], stats: EMPTY_STATS };
 		}
 		return transformGraphData(graph, {
 			enabledTypes,

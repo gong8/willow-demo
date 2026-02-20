@@ -20,35 +20,24 @@ export interface WalkStep {
 	status: "pending" | "settled";
 }
 
-function parseWalkResult(result: unknown): {
-	positionId: string | null;
-	positionContent: string | null;
-	pathIds: string[];
-	childIds: string[];
-} {
-	const empty = {
-		positionId: null,
-		positionContent: null,
-		pathIds: [] as string[],
-		childIds: [] as string[],
-	};
-	if (result == null) return empty;
+function parseWalkResult(result: unknown) {
 	try {
 		const parsed = typeof result === "string" ? JSON.parse(result) : result;
-		if (!parsed || typeof parsed !== "object") return empty;
+		if (!parsed || typeof parsed !== "object") return null;
 		const p = parsed as {
 			position?: { id: string; content?: string };
 			path?: { id: string }[];
 			children?: { id: string }[];
 		};
+		if (!p.position) return null;
 		return {
-			positionId: p.position?.id ?? null,
-			positionContent: p.position?.content ?? null,
+			positionId: p.position.id,
+			positionContent: p.position.content ?? null,
 			pathIds: (p.path ?? []).map((n) => n.id),
 			childIds: (p.children ?? []).map((n) => n.id),
 		};
 	} catch {
-		return empty;
+		return null;
 	}
 }
 
@@ -106,13 +95,10 @@ export function useCumulativeSearchGraph(
 			if (hasResult) latestSettledIndex = steps.length - 1;
 		}
 
-		// Cap merged nodes
 		if (mergedNodeIds.size > MAX_MERGED_NODES) {
-			const arr = [...mergedNodeIds];
+			const keep = [...mergedNodeIds].slice(0, MAX_MERGED_NODES);
 			mergedNodeIds.clear();
-			for (let i = 0; i < MAX_MERGED_NODES; i++) {
-				mergedNodeIds.add(arr[i]);
-			}
+			for (const id of keep) mergedNodeIds.add(id);
 		}
 
 		return { steps, mergedNodeIds, latestSettledIndex };
@@ -124,25 +110,19 @@ export function useCumulativeSearchGraph(
 		return buildSubgraphFromNodes(graph, mergedNodeIds);
 	}, [graph, mergedNodeIds]);
 
-	// Find the last settled step with actual position data (skip "done" steps)
-	const displayStep = useMemo(() => {
-		for (let i = latestSettledIndex; i >= 0; i--) {
-			if (steps[i].positionId) return steps[i];
+	let focusId: string | null = null;
+	for (let i = latestSettledIndex; i >= 0; i--) {
+		if (steps[i].positionId) {
+			focusId = steps[i].positionId;
+			break;
 		}
-		return null;
-	}, [steps, latestSettledIndex]);
-
-	const selections = displayStep?.positionId ? [displayStep.positionId] : [];
-	const actives =
-		displayStep?.status === "pending" && displayStep.positionId
-			? [displayStep.positionId]
-			: [];
+	}
 
 	return {
 		nodes: subgraph.nodes,
 		edges: subgraph.edges,
-		selections,
-		actives,
+		selections: focusId ? [focusId] : [],
+		actives: [],
 		steps,
 		activeStepIndex: latestSettledIndex,
 	};

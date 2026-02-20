@@ -25,7 +25,6 @@ function computeOverallPercent(progress: MaintenanceProgress): number {
 		const within = progress.crawlersComplete / progress.crawlersTotal;
 		return Math.round(pw.start + pw.weight * within);
 	}
-	// For resolving and other phases, show the start of the phase
 	return pw.start;
 }
 
@@ -52,6 +51,16 @@ function computeEta(progress: MaintenanceProgress): string | null {
 	return `~${formatDuration(etaMs)}`;
 }
 
+function StatusIcon({ status }: { status: string }) {
+	if (status === "running")
+		return <Loader2 className="h-3.5 w-3.5 animate-spin text-violet-500" />;
+	if (status === "error")
+		return <AlertCircle className="h-3.5 w-3.5 text-red-500" />;
+	if (status === "complete")
+		return <Check className="h-3.5 w-3.5 text-green-600" />;
+	return <Wrench className="h-3.5 w-3.5" />;
+}
+
 function ProgressBar({
 	percent,
 	indeterminate,
@@ -72,6 +81,43 @@ function ProgressBar({
 	);
 }
 
+function PhaseDetail({
+	progress,
+	elapsed,
+}: { progress: MaintenanceProgress; elapsed: string }) {
+	switch (progress.phase) {
+		case "crawling":
+			if (progress.crawlersTotal === 0) return null;
+			return (
+				<span>
+					{progress.crawlersComplete} of {progress.crawlersTotal} crawlers
+					complete
+					{progress.totalFindings > 0 && (
+						<> &middot; {progress.totalFindings} findings</>
+					)}
+				</span>
+			);
+		case "resolving":
+			return (
+				<span>
+					{progress.totalFindings} findings &middot; {progress.resolverActions}{" "}
+					actions
+				</span>
+			);
+		case "done":
+			return (
+				<span>
+					{progress.totalFindings} findings &middot; {progress.resolverActions}{" "}
+					actions &middot; {elapsed}
+				</span>
+			);
+		case "pre-scan":
+			return <span>Analyzing graph structure...</span>;
+		case "committing":
+			return <span>Saving changes...</span>;
+	}
+}
+
 function ProgressPanel({
 	progress,
 	job,
@@ -81,7 +127,6 @@ function ProgressPanel({
 }) {
 	const percent = computeOverallPercent(progress);
 	const eta = computeEta(progress);
-	const isResolving = progress.phase === "resolving";
 	const isDone = progress.phase === "done" || job.status === "complete";
 	const elapsed = job.completedAt
 		? formatDuration(
@@ -93,11 +138,7 @@ function ProgressPanel({
 		<div className="space-y-2">
 			<div className="flex items-center justify-between text-sm">
 				<div className="flex items-center gap-1.5">
-					{isDone ? (
-						<Check className="h-3.5 w-3.5 text-green-600" />
-					) : (
-						<Loader2 className="h-3.5 w-3.5 animate-spin text-violet-500" />
-					)}
+					<StatusIcon status={isDone ? "complete" : "running"} />
 					<span className="text-foreground">{progress.phaseLabel}</span>
 				</div>
 				<span className="text-muted-foreground text-xs tabular-nums">
@@ -106,38 +147,23 @@ function ProgressPanel({
 			</div>
 			<ProgressBar
 				percent={isDone ? 100 : percent}
-				indeterminate={isResolving}
+				indeterminate={progress.phase === "resolving"}
 			/>
 			<div className="text-xs text-muted-foreground tabular-nums">
-				{progress.phase === "crawling" && progress.crawlersTotal > 0 && (
-					<span>
-						{progress.crawlersComplete} of {progress.crawlersTotal} crawlers
-						complete
-						{progress.totalFindings > 0 && (
-							<> &middot; {progress.totalFindings} findings</>
-						)}
-					</span>
-				)}
-				{progress.phase === "resolving" && (
-					<span>
-						{progress.totalFindings} findings &middot;{" "}
-						{progress.resolverActions} actions
-					</span>
-				)}
-				{isDone && (
-					<span>
-						{progress.totalFindings} findings &middot;{" "}
-						{progress.resolverActions} actions &middot; {elapsed}
-					</span>
-				)}
-				{progress.phase === "pre-scan" && (
-					<span>Analyzing graph structure...</span>
-				)}
-				{progress.phase === "committing" && <span>Saving changes...</span>}
+				<PhaseDetail
+					progress={isDone ? { ...progress, phase: "done" } : progress}
+					elapsed={elapsed}
+				/>
 			</div>
 		</div>
 	);
 }
+
+const STATUS_LABELS: Record<string, string> = {
+	running: "Starting maintenance...",
+	error: "Maintenance failed",
+	complete: "Maintenance complete",
+};
 
 export function MaintenanceIndicator() {
 	const { status, trigger, invalidateGraph } = useMaintenanceStatus();
@@ -153,7 +179,6 @@ export function MaintenanceIndicator() {
 		[progress],
 	);
 
-	// Auto-expand when a job starts, auto-collapse 5s after completion
 	useEffect(() => {
 		if (prevStatusRef.current !== "running" && job?.status === "running") {
 			setExpanded(true);
@@ -184,15 +209,7 @@ export function MaintenanceIndicator() {
 						: "Run graph maintenance"
 				}
 			>
-				{isRunning ? (
-					<Loader2 className="h-3.5 w-3.5 animate-spin text-violet-500" />
-				) : job?.status === "complete" ? (
-					<Check className="h-3.5 w-3.5 text-green-600" />
-				) : job?.status === "error" ? (
-					<AlertCircle className="h-3.5 w-3.5 text-red-500" />
-				) : (
-					<Wrench className="h-3.5 w-3.5" />
-				)}
+				<StatusIcon status={job?.status ?? "idle"} />
 				<span>{isRunning && progress ? `${percent}%` : "Maintain"}</span>
 				{job &&
 					(expanded ? (
@@ -208,22 +225,8 @@ export function MaintenanceIndicator() {
 						<ProgressPanel progress={progress} job={job} />
 					) : (
 						<div className="flex items-center gap-2 text-sm text-muted-foreground">
-							{job.status === "running" ? (
-								<>
-									<Loader2 className="h-3.5 w-3.5 animate-spin text-violet-500" />
-									<span>Starting maintenance...</span>
-								</>
-							) : job.status === "error" ? (
-								<>
-									<AlertCircle className="h-3.5 w-3.5 text-red-500" />
-									<span>Maintenance failed</span>
-								</>
-							) : (
-								<>
-									<Check className="h-3.5 w-3.5 text-green-600" />
-									<span>Maintenance complete</span>
-								</>
-							)}
+							<StatusIcon status={job.status} />
+							<span>{STATUS_LABELS[job.status] ?? "Maintenance complete"}</span>
 						</div>
 					)}
 				</div>

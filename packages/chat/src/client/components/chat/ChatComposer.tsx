@@ -8,6 +8,7 @@ import {
 } from "@assistant-ui/react";
 import { Paperclip, Send, Square, X } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
+import { composerInputClass, sameComponent } from "./message-utils.js";
 
 function StopButton() {
 	const threadRuntime = useThreadRuntime();
@@ -134,11 +135,7 @@ export function ChatComposer() {
 		<div className="shrink-0 border-t border-border p-4">
 			<ComposerPrimitive.Root className="rounded-xl border border-input bg-background">
 				<ComposerPrimitive.Attachments
-					components={{
-						Image: ComposerImageAttachment,
-						File: ComposerImageAttachment,
-						Attachment: ComposerImageAttachment,
-					}}
+					components={sameComponent(ComposerImageAttachment)}
 				/>
 				<div className="flex items-center gap-2 px-3 py-2">
 					<ComposerPrimitive.AddAttachment className="shrink-0 rounded-lg p-2 text-muted-foreground hover:text-foreground hover:bg-accent transition-colors">
@@ -146,7 +143,7 @@ export function ChatComposer() {
 					</ComposerPrimitive.AddAttachment>
 					<ComposerPrimitive.Input
 						placeholder="Type a message..."
-						className="flex-1 resize-none bg-transparent text-sm outline-none max-h-[200px] overflow-y-auto"
+						className={composerInputClass}
 						autoFocus
 					/>
 					<ThreadPrimitive.If running>

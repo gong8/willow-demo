@@ -55,11 +55,8 @@ function checkOrphansAndParents(graph: RawGraph): Finding[] {
 	const visited = new Set<string>();
 	const queue = [graph.root_id];
 
-	for (
-		let nodeId = queue.shift();
-		nodeId !== undefined;
-		nodeId = queue.shift()
-	) {
+	while (queue.length > 0) {
+		const nodeId = queue.shift()!;
 		if (visited.has(nodeId)) continue;
 		visited.add(nodeId);
 
@@ -67,9 +64,7 @@ function checkOrphansAndParents(graph: RawGraph): Finding[] {
 		if (!node) continue;
 
 		for (const childId of node.children) {
-			if (!visited.has(childId)) {
-				queue.push(childId);
-			}
+			if (!visited.has(childId)) queue.push(childId);
 		}
 	}
 
@@ -127,21 +122,19 @@ function checkExpiredTemporal(graph: RawGraph): Finding[] {
 	const now = new Date();
 
 	for (const [nodeId, node] of Object.entries(graph.nodes)) {
-		if (node.temporal?.valid_until) {
-			const expiry = new Date(node.temporal.valid_until);
-			if (expiry < now) {
-				findings.push(
-					finding({
-						category: "expired_temporal",
-						severity: "warning",
-						title: `Expired fact: "${node.content.slice(0, 50)}"`,
-						description: `Node "${nodeId}" has valid_until "${node.temporal.valid_until}" which is in the past.`,
-						nodeIds: [nodeId],
-						linkIds: [],
-						suggestedAction: `Review and update or delete expired node ${nodeId}`,
-					}),
-				);
-			}
+		const validUntil = node.temporal?.valid_until;
+		if (validUntil && new Date(validUntil) < now) {
+			findings.push(
+				finding({
+					category: "expired_temporal",
+					severity: "warning",
+					title: `Expired fact: "${node.content.slice(0, 50)}"`,
+					description: `Node "${nodeId}" has valid_until "${validUntil}" which is in the past.`,
+					nodeIds: [nodeId],
+					linkIds: [],
+					suggestedAction: `Review and update or delete expired node ${nodeId}`,
+				}),
+			);
 		}
 	}
 

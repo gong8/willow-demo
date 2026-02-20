@@ -69,22 +69,16 @@ describe("pre-scan", () => {
 	});
 
 	describe("link integrity", () => {
-		it("detects broken link with missing source node", () => {
+		it.each([
+			["missing source node", "missing", "a"],
+			["missing target node", "a", "missing"],
+		])("detects broken link with %s", (_, from, to) => {
 			const graph = makeGraph(rootWithChild("a"), {
-				link1: makeLink("link1", "missing", "a"),
+				link1: makeLink("link1", from, to),
 			});
 			const broken = findByCategory(runPreScan(graph), "broken_link");
 			expect(broken.length).toBeGreaterThanOrEqual(1);
 			expect(broken[0].linkIds).toContain("link1");
-		});
-
-		it("detects broken link with missing target node", () => {
-			const graph = makeGraph(rootWithChild("a"), {
-				link1: makeLink("link1", "a", "missing"),
-			});
-			expect(
-				findByCategory(runPreScan(graph), "broken_link").length,
-			).toBeGreaterThanOrEqual(1);
 		});
 
 		it("detects self-links", () => {
@@ -109,23 +103,24 @@ describe("pre-scan", () => {
 			expect(orphans[0].nodeIds).toContain("orphan");
 		});
 
-		it("detects broken parent reference", () => {
-			const graph = makeGraph({
-				root: makeNode("root", { node_type: "root", children: ["a"] }),
-				a: makeNode("a", { parent_id: "nonexistent" }),
-			});
+		it.each([
+			[
+				"broken parent reference",
+				{
+					root: makeNode("root", { node_type: "root", children: ["a"] }),
+					a: makeNode("a", { parent_id: "nonexistent" }),
+				},
+			],
+			[
+				"parent-child mismatch",
+				{
+					root: makeNode("root", { node_type: "root", children: [] }),
+					a: makeNode("a", { parent_id: "root" }),
+				},
+			],
+		])("detects %s", (_, nodes) => {
 			expect(
-				findByCategory(runPreScan(graph), "broken_parent").length,
-			).toBeGreaterThanOrEqual(1);
-		});
-
-		it("detects parent-child mismatch", () => {
-			const graph = makeGraph({
-				root: makeNode("root", { node_type: "root", children: [] }),
-				a: makeNode("a", { parent_id: "root" }),
-			});
-			expect(
-				findByCategory(runPreScan(graph), "broken_parent").length,
+				findByCategory(runPreScan(makeGraph(nodes)), "broken_parent").length,
 			).toBeGreaterThanOrEqual(1);
 		});
 	});
@@ -145,22 +140,15 @@ describe("pre-scan", () => {
 			});
 		}
 
-		it("detects expired temporal metadata", () => {
+		it.each([
+			["detects expired", "2024-06-01T00:00:00Z", 1],
+			["ignores non-expired", "2099-01-01T00:00:00Z", 0],
+		])("%s temporal metadata", (_, validUntil, expectedCount) => {
 			const expired = findByCategory(
-				runPreScan(graphWithTemporal("2024-06-01T00:00:00Z")),
+				runPreScan(graphWithTemporal(validUntil)),
 				"expired_temporal",
 			);
-			expect(expired).toHaveLength(1);
-			expect(expired[0].nodeIds).toContain("a");
-		});
-
-		it("does not flag non-expired temporal metadata", () => {
-			expect(
-				findByCategory(
-					runPreScan(graphWithTemporal("2099-01-01T00:00:00Z")),
-					"expired_temporal",
-				),
-			).toHaveLength(0);
+			expect(expired).toHaveLength(expectedCount);
 		});
 	});
 

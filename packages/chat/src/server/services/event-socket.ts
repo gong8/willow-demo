@@ -28,7 +28,7 @@ export function createEventSocket(): EventSocket {
 	);
 
 	log.debug("Socket created", { path: socketPath });
-	const callbacks: SSEEmitter[] = [];
+	let listener: SSEEmitter | null = null;
 
 	const server: Server = createServer((conn) => {
 		log.debug("Client connected");
@@ -42,9 +42,7 @@ export function createEventSocket(): EventSocket {
 						event: string;
 						data: string;
 					};
-					for (const cb of callbacks) {
-						cb(msg.event, msg.data);
-					}
+					listener?.(msg.event, msg.data);
 				} catch {
 					log.debug("Message parse error");
 				}
@@ -58,7 +56,7 @@ export function createEventSocket(): EventSocket {
 	return {
 		socketPath,
 		onEvent(cb: SSEEmitter) {
-			callbacks.push(cb);
+			listener = cb;
 		},
 		cleanup() {
 			log.debug("Socket cleanup", { path: socketPath });

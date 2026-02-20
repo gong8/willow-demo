@@ -1,7 +1,6 @@
 import { readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { resolve } from "node:path";
-import { JsGraphStore } from "@willow/core";
 import { createLogger } from "../../logger.js";
 import type { CrawlerSubtree } from "./crawler.js";
 import { spawnCrawlers } from "./crawler.js";
@@ -26,24 +25,21 @@ function loadGraph(): RawGraph {
 }
 
 function getGraphStats(graph: RawGraph): GraphStats {
-	const nodeCount = Object.keys(graph.nodes).length;
-	const linkCount = Object.keys(graph.links).length;
-	const rootNode = graph.nodes[graph.root_id];
-	const categoryCount = rootNode ? rootNode.children.length : 0;
-	return { nodeCount, linkCount, categoryCount };
+	return {
+		nodeCount: Object.keys(graph.nodes).length,
+		linkCount: Object.keys(graph.links).length,
+		categoryCount: graph.nodes[graph.root_id]?.children.length ?? 0,
+	};
 }
 
 function getTopLevelSubtrees(graph: RawGraph): CrawlerSubtree[] {
 	const rootNode = graph.nodes[graph.root_id];
 	if (!rootNode) return [];
 
-	return rootNode.children
-		.map((childId) => {
-			const node = graph.nodes[childId];
-			if (!node) return null;
-			return { id: childId, content: node.content };
-		})
-		.filter((s): s is CrawlerSubtree => s !== null);
+	return rootNode.children.flatMap((childId) => {
+		const node = graph.nodes[childId];
+		return node ? [{ id: childId, content: node.content }] : [];
+	});
 }
 
 function buildGraphSummary(
@@ -51,8 +47,7 @@ function buildGraphSummary(
 	subtrees: CrawlerSubtree[],
 ): string {
 	const lines = subtrees.map((s) => {
-		const node = graph.nodes[s.id];
-		const childCount = node ? node.children.length : 0;
+		const childCount = graph.nodes[s.id]?.children.length ?? 0;
 		return `- ${s.content} (${childCount} children)`;
 	});
 	return `Top-level categories:\n${lines.join("\n")}`;
@@ -100,11 +95,6 @@ export async function runMaintenancePipeline(options: {
 	log.info("Graph loaded", { ...graphStats });
 
 	// Step 2: Pre-scan (fast, no Claude)
-	emitProgress({
-		phase: "pre-scan",
-		phaseLabel: "Scanning graph...",
-		phaseStartedAt: Date.now(),
-	});
 	const preScanFindings = runPreScan(graph);
 	log.info("Pre-scan complete", { findings: preScanFindings.length });
 
@@ -112,20 +102,21 @@ export async function runMaintenancePipeline(options: {
 	const subtrees = getTopLevelSubtrees(graph);
 	if (subtrees.length === 0) {
 		log.info("No subtrees to crawl, skipping crawler phase");
-		// Still run resolver for pre-scan findings if any
-		const resolverResult =
+		const resolverActions =
 			preScanFindings.length > 0
-				? await spawnResolver({
-						preScanFindings,
-						crawlerReports: [],
-						mcpServerPath: options.mcpServerPath,
-					})
-				: { actionsExecuted: 0 };
+				? (
+						await spawnResolver({
+							preScanFindings,
+							crawlerReports: [],
+							mcpServerPath: options.mcpServerPath,
+						})
+					).actionsExecuted
+				: 0;
 
 		return {
 			preScanFindings,
 			crawlerReports: [],
-			resolverActions: resolverResult.actionsExecuted,
+			resolverActions,
 			graphStats,
 			durationMs: Date.now() - start,
 		};

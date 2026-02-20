@@ -90,16 +90,19 @@ describe("maintenance pipeline", () => {
 		vi.clearAllMocks();
 	});
 
-	it("runs full maintenance pipeline", async () => {
-		const report = await runMaintenancePipeline({
-			mcpServerPath: "/mcp",
-			trigger: "manual",
-		});
+	async function runPipeline(trigger: "manual" | "auto" = "manual") {
+		return runMaintenancePipeline({ mcpServerPath: "/mcp", trigger });
+	}
 
-		expect(report.graphStats.nodeCount).toBe(3);
-		expect(report.graphStats.linkCount).toBe(0);
-		expect(report.graphStats.categoryCount).toBe(2);
-		expect(report.preScanFindings).toHaveLength(0); // Healthy graph
+	it("runs full maintenance pipeline", async () => {
+		const report = await runPipeline();
+
+		expect(report.graphStats).toEqual({
+			nodeCount: 3,
+			linkCount: 0,
+			categoryCount: 2,
+		});
+		expect(report.preScanFindings).toHaveLength(0);
 		expect(report.crawlerReports).toHaveLength(2);
 		expect(report.resolverActions).toBe(1);
 		expect(report.durationMs).toBeGreaterThanOrEqual(0);
@@ -109,12 +112,8 @@ describe("maintenance pipeline", () => {
 	});
 
 	it("passes pre-scan findings to crawlers", async () => {
-		const report = await runMaintenancePipeline({
-			mcpServerPath: "/mcp",
-			trigger: "auto",
-		});
+		await runPipeline("auto");
 
-		// spawnCrawlers should have been called with preScanFindings
 		const call = vi.mocked(spawnCrawlers).mock.calls[0][0];
 		expect(call.subtrees).toHaveLength(2);
 		expect(call.mcpServerPath).toBe("/mcp");
@@ -122,25 +121,16 @@ describe("maintenance pipeline", () => {
 	});
 
 	it("skips resolver when no findings", async () => {
-		vi.mocked(spawnCrawlers).mockResolvedValueOnce([
-			{
-				subtreeRoot: "cat1",
-				subtreeContent: "Personal",
+		vi.mocked(spawnCrawlers).mockResolvedValueOnce(
+			["cat1", "cat2"].map((id) => ({
+				subtreeRoot: id,
+				subtreeContent: id === "cat1" ? "Personal" : "Work",
 				nodesExplored: 1,
 				findings: [],
-			},
-			{
-				subtreeRoot: "cat2",
-				subtreeContent: "Work",
-				nodesExplored: 1,
-				findings: [],
-			},
-		]);
+			})),
+		);
 
-		const report = await runMaintenancePipeline({
-			mcpServerPath: "/mcp",
-			trigger: "manual",
-		});
+		const report = await runPipeline();
 
 		expect(spawnResolver).not.toHaveBeenCalled();
 		expect(report.resolverActions).toBe(0);

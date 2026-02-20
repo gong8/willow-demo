@@ -2,6 +2,13 @@ import type { WillowGraph } from "./graph-types.js";
 
 const BASE_URL = "/api";
 
+async function throwIfNotOk(res: Response, fallback = "Request failed") {
+	if (!res.ok) {
+		const err = await res.json();
+		throw new Error(err.error || fallback);
+	}
+}
+
 async function fetchJson<T>(path: string): Promise<T> {
 	const res = await fetch(`${BASE_URL}${path}`);
 	return res.json();
@@ -19,11 +26,12 @@ async function postJson<T>(
 			body: JSON.stringify(body),
 		}),
 	});
-	if (checkOk && !res.ok) {
-		const err = await res.json();
-		throw new Error(err.error || "Request failed");
-	}
+	if (checkOk) await throwIfNotOk(res);
 	return res.json();
+}
+
+async function deleteReq(path: string): Promise<void> {
+	await fetch(`${BASE_URL}${path}`, { method: "DELETE" });
 }
 
 export interface Conversation {
@@ -96,8 +104,8 @@ export function createConversation(): Promise<Conversation> {
 	return postJson("/chat/conversations");
 }
 
-export async function deleteConversation(id: string): Promise<void> {
-	await fetch(`${BASE_URL}/chat/conversations/${id}`, { method: "DELETE" });
+export function deleteConversation(id: string): Promise<void> {
+	return deleteReq(`/chat/conversations/${id}`);
 }
 
 export function fetchMessages(conversationId: string): Promise<Message[]> {
@@ -143,10 +151,7 @@ export async function uploadResource(file: File): Promise<Resource> {
 		method: "POST",
 		body: formData,
 	});
-	if (!res.ok) {
-		const err = await res.json();
-		throw new Error(err.error || "Upload failed");
-	}
+	await throwIfNotOk(res, "Upload failed");
 	return res.json();
 }
 
@@ -154,8 +159,8 @@ export function createUrlResource(url: string): Promise<Resource> {
 	return postJson("/resources/url", { url }, { checkOk: true });
 }
 
-export async function deleteResource(id: string): Promise<void> {
-	await fetch(`${BASE_URL}/resources/${id}`, { method: "DELETE" });
+export function deleteResource(id: string): Promise<void> {
+	return deleteReq(`/resources/${id}`);
 }
 
 export function fetchResourceContent(
@@ -175,10 +180,7 @@ export async function indexResourceStream(
 		body: JSON.stringify({ context }),
 	});
 
-	if (!res.ok) {
-		const err = await res.json();
-		throw new Error(err.error || "Indexing failed");
-	}
+	await throwIfNotOk(res, "Indexing failed");
 
 	const reader = res.body?.getReader();
 	if (!reader) return;

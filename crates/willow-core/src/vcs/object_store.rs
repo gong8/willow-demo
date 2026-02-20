@@ -3,7 +3,6 @@ use crate::model::Graph;
 use crate::vcs::types::{CommitData, CommitHash, Delta, HeadState, RepoConfig};
 use serde::Serialize;
 use sha2::{Digest, Sha256};
-use std::io::Read;
 use std::path::{Path, PathBuf};
 use tracing::debug;
 
@@ -21,10 +20,9 @@ impl ObjectStore {
 
     /// Initialize the repo directory structure.
     pub fn init(&self) -> Result<(), WillowError> {
-        std::fs::create_dir_all(self.commits_dir())?;
-        std::fs::create_dir_all(self.snapshots_dir())?;
-        std::fs::create_dir_all(self.deltas_dir())?;
-        std::fs::create_dir_all(self.refs_heads_dir())?;
+        for dir in [self.commits_dir(), self.snapshots_dir(), self.deltas_dir(), self.refs_heads_dir()] {
+            std::fs::create_dir_all(dir)?;
+        }
         Ok(())
     }
 
@@ -144,15 +142,16 @@ impl ObjectStore {
         if !dir.exists() {
             return Ok(Vec::new());
         }
-        let mut branches = Vec::new();
-        for entry in std::fs::read_dir(dir)? {
-            let entry = entry?;
-            if entry.file_type()?.is_file() {
-                if let Some(name) = entry.file_name().to_str() {
-                    branches.push(name.to_string());
+        let mut branches: Vec<String> = std::fs::read_dir(dir)?
+            .filter_map(|entry| {
+                let entry = entry.ok()?;
+                if entry.file_type().ok()?.is_file() {
+                    entry.file_name().to_str().map(str::to_string)
+                } else {
+                    None
                 }
-            }
-        }
+            })
+            .collect();
         branches.sort();
         Ok(branches)
     }
@@ -196,9 +195,7 @@ impl ObjectStore {
             return Err(WillowError::VcsCommitNotFound(hash.0.clone()));
         }
         let compressed = std::fs::read(path)?;
-        let mut decoder = zstd::Decoder::new(compressed.as_slice()).map_err(WillowError::Io)?;
-        let mut json = Vec::new();
-        decoder.read_to_end(&mut json).map_err(WillowError::Io)?;
+        let json = zstd::decode_all(compressed.as_slice()).map_err(WillowError::Io)?;
         let graph: Graph = serde_json::from_slice(&json)?;
         Ok(graph)
     }

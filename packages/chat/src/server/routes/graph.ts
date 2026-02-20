@@ -53,6 +53,22 @@ function storeHandler(
 	};
 }
 
+function isDiffNonEmpty(store: InstanceType<typeof JsGraphStore>): boolean {
+	try {
+		const d = store.diffDiskVsHead();
+		return (
+			d.nodesCreated.length > 0 ||
+			d.nodesUpdated.length > 0 ||
+			d.nodesDeleted.length > 0 ||
+			d.linksCreated.length > 0 ||
+			d.linksRemoved.length > 0 ||
+			d.linksUpdated.length > 0
+		);
+	} catch {
+		return false;
+	}
+}
+
 // GET / — current graph state
 graphRoutes.get("/", (c) => {
 	if (!existsSync(GRAPH_PATH)) {
@@ -69,28 +85,12 @@ graphRoutes.get("/", (c) => {
 	}
 });
 
-// GET /status — HEAD hash + whether on-disk graph differs from last commit
 graphRoutes.get("/status", (c) => {
 	try {
 		const store = getStore();
 		const headHash = store.headHash() ?? null;
-
-		let hasLocalChanges = false;
-		if (headHash && existsSync(GRAPH_PATH)) {
-			try {
-				const diff = store.diffDiskVsHead();
-				hasLocalChanges =
-					diff.nodesCreated.length > 0 ||
-					diff.nodesUpdated.length > 0 ||
-					diff.nodesDeleted.length > 0 ||
-					diff.linksCreated.length > 0 ||
-					diff.linksRemoved.length > 0 ||
-					diff.linksUpdated.length > 0;
-			} catch {
-				// If comparison fails, assume no changes
-			}
-		}
-
+		const hasLocalChanges =
+			headHash && existsSync(GRAPH_PATH) ? isDiffNonEmpty(store) : false;
 		return c.json({ headHash, hasLocalChanges });
 	} catch (e: unknown) {
 		log.error("Failed to get status", { error: (e as Error).message });
@@ -169,14 +169,17 @@ graphRoutes.post(
 	}),
 );
 
-graphRoutes.get("/diff", (c) => {
-	const from = c.req.query("from");
-	const to = c.req.query("to");
-	if (!from || !to) {
-		return c.json({ error: "Both 'from' and 'to' query params required" }, 400);
-	}
-	return storeHandler("diff", (store) => store.diff(from, to))(c);
-});
+graphRoutes.get(
+	"/diff",
+	storeHandler("diff", (store, c) => {
+		const from = c.req.query("from");
+		const to = c.req.query("to");
+		if (!from || !to) {
+			throw new Error("Both 'from' and 'to' query params required");
+		}
+		return store.diff(from, to);
+	}),
+);
 
 graphRoutes.get(
 	"/at/:hash",

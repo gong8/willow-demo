@@ -64,66 +64,59 @@ describe("cli-chat utilities", () => {
 });
 
 describe("cli-chat stream parser", () => {
+	function streamEvent(event: Record<string, unknown>) {
+		return { type: "stream_event", event };
+	}
+
 	it("parses stream events correctly", () => {
 		const emit = vi.fn();
 		const parser = createStreamParser(emit);
 
-		// Test content text
-		parser.process({
-			type: "stream_event",
-			event: {
+		// Text content block
+		parser.process(
+			streamEvent({
 				type: "content_block_start",
 				index: 0,
 				content_block: { type: "text" },
-			},
-		});
-		parser.process({
-			type: "stream_event",
-			event: {
+			}),
+		);
+		parser.process(
+			streamEvent({
 				type: "content_block_delta",
 				index: 0,
 				delta: { type: "text_delta", text: "Hello" },
-			},
-		});
-		parser.process({
-			type: "stream_event",
-			event: { type: "content_block_stop", index: 0 },
-		});
+			}),
+		);
+		parser.process(streamEvent({ type: "content_block_stop", index: 0 }));
 
 		expect(emit).toHaveBeenCalledWith(
 			"content",
 			JSON.stringify({ content: "Hello" }),
 		);
 
-		// Test tool use
-		parser.process({
-			type: "stream_event",
-			event: {
+		// Tool use block
+		parser.process(
+			streamEvent({
 				type: "content_block_start",
 				index: 1,
 				content_block: { type: "tool_use", id: "t1", name: "search" },
-			},
-		});
-		parser.process({
-			type: "stream_event",
-			event: {
+			}),
+		);
+		parser.process(
+			streamEvent({
 				type: "content_block_delta",
 				index: 1,
 				delta: { type: "input_json_delta", partial_json: '{"q"' },
-			},
-		});
-		parser.process({
-			type: "stream_event",
-			event: {
+			}),
+		);
+		parser.process(
+			streamEvent({
 				type: "content_block_delta",
 				index: 1,
 				delta: { type: "input_json_delta", partial_json: ':"test"}' },
-			},
-		});
-		parser.process({
-			type: "stream_event",
-			event: { type: "content_block_stop", index: 1 },
-		});
+			}),
+		);
+		parser.process(streamEvent({ type: "content_block_stop", index: 1 }));
 
 		expect(emit).toHaveBeenCalledWith(
 			"tool_call_start",

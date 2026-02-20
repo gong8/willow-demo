@@ -7,6 +7,51 @@ import type {
 	SearchResultsPart,
 } from "../lib/chat-adapter.js";
 
+function toToolCallItem({
+	toolCallId,
+	toolName,
+	args,
+	result,
+	isError,
+}: ToolCallData) {
+	return { toolCallId, toolName, args, result, isError };
+}
+
+function parseXmlToolCalls(content: string, messageIndex: number) {
+	const calls = [
+		...content.matchAll(/<tool_call>\s*([\s\S]*?)\s*<\/tool_call>/g),
+	].flatMap((m) => {
+		try {
+			const parsed = JSON.parse(m[1]);
+			return [{ name: parsed.name, args: parsed.arguments || {} }];
+		} catch {
+			return [];
+		}
+	});
+
+	const results = [
+		...content.matchAll(/<tool_result>\s*([\s\S]*?)\s*<\/tool_result>/g),
+	].map((m) => m[1].trim());
+
+	return calls.map((call, j) => ({
+		type: "tool-call" as const,
+		toolCallId: `hist_tc_${messageIndex}_${j}`,
+		toolName: call.name,
+		args: call.args,
+		argsText: JSON.stringify(call.args),
+		result: results[j],
+		isError: false,
+	}));
+}
+
+function stripXmlToolTags(content: string) {
+	return content
+		.replace(/<tool_call>[\s\S]*?<\/tool_call>/g, "")
+		.replace(/<tool_result>[\s\S]*?<\/tool_result>/g, "")
+		.replace(/\n{3,}/g, "\n\n")
+		.trim();
+}
+
 export function useChatHistory(
 	conversationId: string,
 	queryClient: QueryClient,
@@ -45,29 +90,15 @@ export function useChatHistory(
 						if (m.toolCalls) {
 							try {
 								const toolCalls: ToolCallData[] = JSON.parse(m.toolCalls);
-
-								// Group tool calls by phase
-								const searchCalls: SearchResultsPart["toolCalls"] = [];
-								const indexerCalls: IndexerResultsPart["toolCalls"] = [];
+								const searchCalls = toolCalls
+									.filter((tc) => tc.phase === "search")
+									.map(toToolCallItem);
+								const indexerCalls = toolCalls
+									.filter((tc) => tc.phase === "indexer")
+									.map(toToolCallItem);
 
 								for (const tc of toolCalls) {
-									if (tc.phase === "search") {
-										searchCalls.push({
-											toolCallId: tc.toolCallId,
-											toolName: tc.toolName,
-											args: tc.args,
-											result: tc.result,
-											isError: tc.isError,
-										});
-									} else if (tc.phase === "indexer") {
-										indexerCalls.push({
-											toolCallId: tc.toolCallId,
-											toolName: tc.toolName,
-											args: tc.args,
-											result: tc.result,
-											isError: tc.isError,
-										});
-									} else {
+									if (tc.phase !== "search" && tc.phase !== "indexer") {
 										contentParts.push({
 											type: "tool-call",
 											toolCallId: tc.toolCallId,
@@ -100,51 +131,11 @@ export function useChatHistory(
 							}
 						}
 
-						// Parse XML-embedded tool calls from content
-						const callRe = /<tool_call>\s*([\s\S]*?)\s*<\/tool_call>/g;
-						const resultRe = /<tool_result>\s*([\s\S]*?)\s*<\/tool_result>/g;
-						const xmlCalls: Array<{
-							name: string;
-							args: Record<string, unknown>;
-						}> = [];
-						const xmlResults: string[] = [];
-						let rm: RegExpExecArray | null;
-						rm = callRe.exec(m.content);
-						while (rm !== null) {
-							try {
-								const parsed = JSON.parse(rm[1]);
-								xmlCalls.push({
-									name: parsed.name,
-									args: parsed.arguments || {},
-								});
-							} catch {
-								/* skip */
-							}
-							rm = callRe.exec(m.content);
-						}
-						rm = resultRe.exec(m.content);
-						while (rm !== null) {
-							xmlResults.push(rm[1].trim());
-							rm = resultRe.exec(m.content);
-						}
-						for (let j = 0; j < xmlCalls.length; j++) {
-							contentParts.push({
-								type: "tool-call",
-								toolCallId: `hist_tc_${i}_${j}`,
-								toolName: xmlCalls[j].name,
-								args: xmlCalls[j].args,
-								argsText: JSON.stringify(xmlCalls[j].args),
-								result: xmlResults[j],
-								isError: false,
-							});
-						}
-
-						const cleanContent = m.content
-							.replace(/<tool_call>[\s\S]*?<\/tool_call>/g, "")
-							.replace(/<tool_result>[\s\S]*?<\/tool_result>/g, "")
-							.replace(/\n{3,}/g, "\n\n")
-							.trim();
-						contentParts.push({ type: "text", text: cleanContent });
+						contentParts.push(...parseXmlToolCalls(m.content, i));
+						contentParts.push({
+							type: "text",
+							text: stripXmlToolTags(m.content),
+						});
 
 						return {
 							message: {

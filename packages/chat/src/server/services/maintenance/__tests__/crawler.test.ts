@@ -47,19 +47,17 @@ function createMockProc(textToEmit?: string) {
 	};
 }
 
-const defaultCrawlerOpts = {
-	subtreeRootId: "cat1",
-	subtreeContent: "Category 1",
-	crawlerIndex: 1,
+const sharedOpts = {
 	mcpServerPath: "/mcp",
 	graphSummary: "Summary",
 	preScanFindings: [] as Finding[],
 };
 
-const defaultCrawlersOpts = {
-	mcpServerPath: "/mcp",
-	graphSummary: "Summary",
-	preScanFindings: [] as Finding[],
+const defaultCrawlerOpts = {
+	...sharedOpts,
+	subtreeRootId: "cat1",
+	subtreeContent: "Category 1",
+	crawlerIndex: 1,
 };
 
 describe("crawler", () => {
@@ -100,7 +98,7 @@ describe("crawler", () => {
 				content: `Category ${i}`,
 			}));
 
-			await spawnCrawlers({ ...defaultCrawlersOpts, subtrees });
+			await spawnCrawlers({ ...sharedOpts, subtrees });
 
 			expect(spawnCli).toHaveBeenCalledTimes(8);
 		});
@@ -114,7 +112,7 @@ describe("crawler", () => {
 				{ id: "cat3", content: "Cat 3" },
 			];
 
-			const reports = await spawnCrawlers({ ...defaultCrawlersOpts, subtrees });
+			const reports = await spawnCrawlers({ ...sharedOpts, subtrees });
 
 			expect(spawnCli).toHaveBeenCalledTimes(3);
 			expect(reports).toHaveLength(3);

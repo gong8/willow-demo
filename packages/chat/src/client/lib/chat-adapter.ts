@@ -64,21 +64,13 @@ export const chatAttachmentAdapter: AttachmentAdapter = {
 	},
 };
 
-interface ToolCallState {
-	toolCallId: string;
-	toolName: string;
-	args?: Record<string, unknown>;
-	result?: string;
-	isError?: boolean;
-}
-
-type ToolCallItem = {
+interface ToolCallItem {
 	toolCallId: string;
 	toolName: string;
 	args: Record<string, unknown>;
 	result?: string;
 	isError?: boolean;
-};
+}
 
 export interface SearchResultsPart {
 	type: "search-results";
@@ -108,7 +100,7 @@ type ContentPart =
 interface SseState {
 	textContent: string;
 	thinkingText: string;
-	toolCalls: Map<string, ToolCallState>;
+	toolCalls: Map<string, ToolCallItem>;
 	searchPhase: "idle" | "searching" | "done";
 	indexerPhase: "idle" | "running" | "done";
 }
@@ -147,16 +139,6 @@ function parseTextToolCalls(text: string) {
 	return { cleanText, parsedCalls };
 }
 
-function toToolCallItem(tc: ToolCallState): ToolCallItem {
-	return {
-		toolCallId: tc.toolCallId,
-		toolName: tc.toolName,
-		args: tc.args ?? {},
-		result: tc.result,
-		isError: tc.isError,
-	};
-}
-
 function buildParts(state: SseState) {
 	const { cleanText, parsedCalls } = parseTextToolCalls(state.textContent);
 	const contentParts: ContentPart[] = [];
@@ -168,17 +150,16 @@ function buildParts(state: SseState) {
 
 	for (const tc of state.toolCalls.values()) {
 		if (tc.toolCallId.startsWith("search__")) {
-			searchCalls.push(toToolCallItem(tc));
+			searchCalls.push(tc);
 		} else if (tc.toolCallId.startsWith("indexer__")) {
-			indexerCalls.push(toToolCallItem(tc));
+			indexerCalls.push(tc);
 		} else {
-			const args = tc.args ?? {};
 			contentParts.push({
 				type: "tool-call",
 				toolCallId: tc.toolCallId,
 				toolName: tc.toolName,
-				args,
-				argsText: JSON.stringify(args),
+				args: tc.args,
+				argsText: JSON.stringify(tc.args),
 				result: tc.result,
 				isError: tc.isError,
 			});
@@ -220,32 +201,22 @@ function buildParts(state: SseState) {
 	return { contentParts, searchResults, indexerResults };
 }
 
-function handlePhaseEvent(
-	eventType: string,
-	status: unknown,
-	state: SseState,
-): boolean {
-	if (eventType === "search_phase") {
-		if (status === "start") state.searchPhase = "searching";
-		else if (status === "end") state.searchPhase = "done";
-		return true;
-	}
-	if (eventType === "indexer_phase") {
-		if (status === "start") state.indexerPhase = "running";
-		else if (status === "end") state.indexerPhase = "done";
-		return true;
-	}
-	return false;
-}
-
 function handleSseEvent(
 	eventType: string,
 	parsed: Record<string, unknown>,
 	state: SseState,
 ): boolean {
-	if (handlePhaseEvent(eventType, parsed.status, state)) return true;
-
 	switch (eventType) {
+		case "search_phase":
+			if (parsed.status === "start") state.searchPhase = "searching";
+			else if (parsed.status === "end") state.searchPhase = "done";
+			return true;
+
+		case "indexer_phase":
+			if (parsed.status === "start") state.indexerPhase = "running";
+			else if (parsed.status === "end") state.indexerPhase = "done";
+			return true;
+
 		case "content":
 			if (parsed.content) {
 				state.textContent += parsed.content as string;
@@ -257,6 +228,7 @@ function handleSseEvent(
 			state.toolCalls.set(parsed.toolCallId as string, {
 				toolCallId: parsed.toolCallId as string,
 				toolName: parsed.toolName as string,
+				args: {},
 			});
 			return true;
 
@@ -357,44 +329,43 @@ async function* readSseStream(
 	}
 }
 
-type MsgRecord = Record<string, unknown> | null | undefined;
+function extractLastMessage(message: unknown) {
+	const msg = message as Record<string, unknown> | null;
+	const content = Array.isArray(msg?.content)
+		? (msg.content as Array<Record<string, unknown>>)
+		: [];
 
-function extractAttachmentIds(message: unknown): string[] {
-	const msg = message as MsgRecord;
-	if (!msg) return [];
+	const text = content
+		.filter((part) => part.type === "text")
+		.map((part) => part.text as string)
+		.join("");
 
-	const ids = new Set<string>();
-
-	if (Array.isArray(msg.attachments)) {
-		for (const att of msg.attachments) {
-			const id = (att as MsgRecord)?.id;
-			if (typeof id === "string" && id) ids.add(id);
+	const attachmentIds = new Set<string>();
+	if (Array.isArray(msg?.attachments)) {
+		for (const att of msg.attachments as Array<Record<string, unknown>>) {
+			if (typeof att.id === "string" && att.id) attachmentIds.add(att.id);
+		}
+	}
+	for (const part of content) {
+		if (part.type === "image" && typeof part.image === "string") {
+			const match = (part.image as string).match(
+				/\/chat\/attachments\/([^/]+)$/,
+			);
+			if (match) attachmentIds.add(match[1]);
 		}
 	}
 
-	if (Array.isArray(msg.content)) {
-		for (const part of msg.content as Array<Record<string, unknown>>) {
-			if (part.type === "image" && typeof part.image === "string") {
-				const match = (part.image as string).match(
-					/\/chat\/attachments\/([^/]+)$/,
-				);
-				if (match) ids.add(match[1]);
-			}
-		}
-	}
-
-	return [...ids];
+	return { text, attachmentIds: [...attachmentIds] };
 }
 
-function extractUserText(message: unknown): string {
-	const msg = message as Record<string, unknown> | null;
-	if (!msg?.content || !Array.isArray(msg.content)) return "";
-	return (
-		msg.content
-			.filter((part: { type: string }) => part.type === "text")
-			.map((part: { text: string }) => part.text)
-			.join("") || ""
-	);
+function createSseState(): SseState {
+	return {
+		textContent: "",
+		thinkingText: "",
+		toolCalls: new Map(),
+		searchPhase: "idle",
+		indexerPhase: "idle",
+	};
 }
 
 export function createWillowChatAdapter(
@@ -402,9 +373,9 @@ export function createWillowChatAdapter(
 ): ChatModelAdapter {
 	return {
 		async *run({ messages, abortSignal }) {
-			const lastMessage = messages[messages.length - 1];
-			const userText = extractUserText(lastMessage);
-			const attachmentIds = extractAttachmentIds(lastMessage);
+			const { text: userText, attachmentIds } = extractLastMessage(
+				messages[messages.length - 1],
+			);
 			const expectedPriorCount = messages.length - 1;
 
 			const response = await fetch(`${BASE_URL}/chat/stream`, {
@@ -434,15 +405,7 @@ export function createWillowChatAdapter(
 			const reader = response.body?.getReader();
 			if (!reader) throw new Error("No response body");
 
-			const state: SseState = {
-				textContent: "",
-				thinkingText: "",
-				toolCalls: new Map<string, ToolCallState>(),
-				searchPhase: "idle",
-				indexerPhase: "idle",
-			};
-
-			yield* readSseStream(reader, state);
+			yield* readSseStream(reader, createSseState());
 		},
 	};
 }

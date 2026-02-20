@@ -120,3 +120,13 @@ pub struct Graph {
     pub nodes: HashMap<NodeId, Node>,
     pub links: HashMap<LinkId, Link>,
 }
+
+impl Graph {
+    pub fn empty(root_id: NodeId) -> Self {
+        Graph {
+            root_id,
+            nodes: HashMap::new(),
+            links: HashMap::new(),
+        }
+    }
+}

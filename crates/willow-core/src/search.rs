@@ -13,6 +13,10 @@ pub struct SearchResult {
     pub depth: usize,
 }
 
+fn cmp_score(a: &f64, b: &f64) -> std::cmp::Ordering {
+    a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal)
+}
+
 /// Search the graph by traversing from the root node via BFS.
 /// Only nodes reachable through the tree hierarchy are visited.
 pub fn search_nodes(graph: &Graph, query: &str, max_results: usize) -> Vec<SearchResult> {
@@ -42,23 +46,25 @@ pub fn search_nodes(graph: &Graph, query: &str, max_results: usize) -> Vec<Searc
         }
     }
 
-    results.sort_by(|a, b| b.score.partial_cmp(&a.score).unwrap_or(std::cmp::Ordering::Equal));
+    results.sort_by(|a, b| cmp_score(&b.score, &a.score));
     results.truncate(max_results);
     debug!(query = %query, results = results.len(), "search complete");
     results
 }
 
 fn score_node(node: &Node, query_lower: &str, terms: &[&str], depth: usize) -> Option<SearchResult> {
-    let meta_candidates = node.metadata.iter()
-        .map(|(k, v)| (score_text(v, query_lower, terms) * 0.5, format!("metadata.{}", k)));
+    let candidates = [
+        (1.0, "content", node.content.as_str()),
+        (0.3, "node_type", node.node_type.as_str()),
+    ];
 
-    let (best_score, best_field) = [
-        (score_text(&node.content, query_lower, terms), "content".to_string()),
-        (score_text(node.node_type.as_str(), query_lower, terms) * 0.3, "node_type".to_string()),
-    ]
-    .into_iter()
-    .chain(meta_candidates)
-    .max_by(|a, b| a.0.partial_cmp(&b.0).unwrap_or(std::cmp::Ordering::Equal))?;
+    let (best_score, best_field) = candidates
+        .into_iter()
+        .map(|(weight, field, text)| (score_text(text, query_lower, terms) * weight, field.to_string()))
+        .chain(node.metadata.iter().map(|(k, v)| {
+            (score_text(v, query_lower, terms) * 0.5, format!("metadata.{k}"))
+        }))
+        .max_by(|a, b| cmp_score(&a.0, &b.0))?;
 
     if best_score > 0.0 {
         Some(SearchResult {
@@ -77,28 +83,17 @@ fn score_node(node: &Node, query_lower: &str, terms: &[&str], depth: usize) -> O
 fn score_text(text: &str, query_lower: &str, terms: &[&str]) -> f64 {
     let text_lower = text.to_lowercase();
 
-    // Exact substring match
     if text_lower.contains(query_lower) {
         return 1.0;
     }
 
-    // Check individual terms
-    let matched_terms = terms
-        .iter()
-        .filter(|t| text_lower.contains(**t))
-        .count();
+    let matched = terms.iter().filter(|t| text_lower.contains(**t)).count();
 
-    if matched_terms == terms.len() {
-        // All terms present
-        return 0.6;
+    match matched {
+        n if n == terms.len() => 0.6,
+        0 => 0.0,
+        n => 0.3 * (n as f64 / terms.len() as f64),
     }
-
-    if matched_terms > 0 {
-        // Partial terms
-        return 0.3 * (matched_terms as f64 / terms.len() as f64);
-    }
-
-    0.0
 }
 
 #[cfg(test)]

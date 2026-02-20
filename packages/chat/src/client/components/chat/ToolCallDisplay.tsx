@@ -29,6 +29,19 @@ export function getToolLabel(
 	return short.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
 }
 
+export function ToolCallStatusIcon({
+	isError,
+	hasResult,
+}: { isError?: boolean; hasResult: boolean }) {
+	if (isError)
+		return <AlertTriangle className="h-3.5 w-3.5 shrink-0 text-destructive" />;
+	if (hasResult)
+		return <Check className="h-3.5 w-3.5 shrink-0 text-green-600" />;
+	return (
+		<Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin text-muted-foreground" />
+	);
+}
+
 export function ToolCallDisplay(props: ToolCallMessagePartProps) {
 	const { toolName, args, result, isError } = props;
 	const [expanded, setExpanded] = useState(false);
@@ -43,13 +56,7 @@ export function ToolCallDisplay(props: ToolCallMessagePartProps) {
 				className="flex w-full items-center gap-2 px-3 py-2 text-left hover:bg-accent/50 transition-colors rounded-lg"
 				disabled={!hasResult}
 			>
-				{isError ? (
-					<AlertTriangle className="h-3.5 w-3.5 shrink-0 text-destructive" />
-				) : hasResult ? (
-					<Check className="h-3.5 w-3.5 shrink-0 text-green-600" />
-				) : (
-					<Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin text-muted-foreground" />
-				)}
+				<ToolCallStatusIcon isError={isError} hasResult={hasResult} />
 				<span
 					className={`flex-1 truncate ${isError ? "text-destructive" : "text-muted-foreground"}`}
 				>

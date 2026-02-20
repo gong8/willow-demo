@@ -14,7 +14,7 @@ import { IndexerIndicator } from "./IndexerIndicator.js";
 import { ReasoningDisplay } from "./ReasoningDisplay.js";
 import { SearchIndicator } from "./SearchIndicator.js";
 import { WillowToolCallDisplay } from "./WillowToolCallDisplay.js";
-import { MessageTimestamp, actionButtonClass } from "./message-utils.js";
+import { MessageActionBar, actionButtonClass } from "./message-utils.js";
 
 function MarkdownText() {
 	return <MarkdownTextPrimitive remarkPlugins={[remarkGfm]} />;
@@ -62,20 +62,17 @@ export function AssistantMessage() {
 					/>
 				</div>
 				<IndexerResults />
-				<div className="flex items-center gap-1.5 opacity-0 group-hover:opacity-100 transition-opacity">
-					<MessageTimestamp />
-					<ActionBarPrimitive.Root className="flex items-center gap-1">
-						<ActionBarPrimitive.Copy
-							copiedDuration={2000}
-							className={actionButtonClass}
-						>
-							<ClipboardCopy className="h-4 w-4" />
-						</ActionBarPrimitive.Copy>
-						<ActionBarPrimitive.Reload className={actionButtonClass}>
-							<RefreshCw className="h-4 w-4" />
-						</ActionBarPrimitive.Reload>
-					</ActionBarPrimitive.Root>
-				</div>
+				<MessageActionBar>
+					<ActionBarPrimitive.Copy
+						copiedDuration={2000}
+						className={actionButtonClass}
+					>
+						<ClipboardCopy className="h-4 w-4" />
+					</ActionBarPrimitive.Copy>
+					<ActionBarPrimitive.Reload className={actionButtonClass}>
+						<RefreshCw className="h-4 w-4" />
+					</ActionBarPrimitive.Reload>
+				</MessageActionBar>
 			</div>
 		</MessagePrimitive.Root>
 	);

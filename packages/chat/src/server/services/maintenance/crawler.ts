@@ -229,15 +229,13 @@ export function spawnCrawler(
 
 		let textOutput = "";
 
-		// Silent emitter — we only care about text output for report parsing
 		const emitter = (event: string, data: string) => {
-			if (event === "content") {
-				try {
-					const parsed = JSON.parse(data);
-					if (parsed.content) textOutput += parsed.content;
-				} catch {
-					/* ignore */
-				}
+			if (event !== "content") return;
+			try {
+				const parsed = JSON.parse(data);
+				if (parsed.content) textOutput += parsed.content;
+			} catch {
+				/* ignore non-JSON chunks */
 			}
 		};
 

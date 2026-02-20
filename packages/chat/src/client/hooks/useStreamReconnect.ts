@@ -3,6 +3,55 @@ import type { ReconnectStream } from "../components/chat/ReconnectStreamView.js"
 
 const BASE_URL = "/api";
 
+function scrollIfNearBottom(el: HTMLElement | null) {
+	if (!el) return;
+	if (el.scrollHeight - el.scrollTop - el.clientHeight < 80) {
+		el.scrollTo({ top: el.scrollHeight });
+	}
+}
+
+function applySseEvent(
+	state: ReconnectStream,
+	eventType: string,
+	parsed: Record<string, unknown>,
+): boolean {
+	switch (eventType) {
+		case "content":
+			if (parsed.content) {
+				state.content += parsed.content as string;
+				return true;
+			}
+			return false;
+		case "tool_call_start":
+			state.toolCalls.set(parsed.toolCallId as string, {
+				toolCallId: parsed.toolCallId as string,
+				toolName: parsed.toolName as string,
+			});
+			return true;
+		case "tool_call_args": {
+			const tc = state.toolCalls.get(parsed.toolCallId as string);
+			if (tc) tc.args = parsed.args as Record<string, unknown>;
+			return true;
+		}
+		case "tool_result": {
+			const tc = state.toolCalls.get(parsed.toolCallId as string);
+			if (tc) {
+				tc.result = parsed.result as string;
+				tc.isError = parsed.isError as boolean;
+			}
+			return true;
+		}
+		case "thinking_delta":
+			if (parsed.text) {
+				state.thinkingText += parsed.text as string;
+				return true;
+			}
+			return false;
+		default:
+			return false;
+	}
+}
+
 export function useStreamReconnect(
 	conversationId: string,
 	adapterStreamingRef: React.RefObject<boolean>,
@@ -88,42 +137,8 @@ export function useStreamReconnect(
 
 						try {
 							const parsed = JSON.parse(data);
-							switch (currentEventType) {
-								case "content":
-									if (parsed.content) {
-										state.content += parsed.content;
-										updated = true;
-									}
-									break;
-								case "tool_call_start": {
-									const { toolCallId, toolName } = parsed;
-									state.toolCalls.set(toolCallId, { toolCallId, toolName });
-									updated = true;
-									break;
-								}
-								case "tool_call_args": {
-									const { toolCallId, args } = parsed;
-									const tc = state.toolCalls.get(toolCallId);
-									if (tc) tc.args = args;
-									updated = true;
-									break;
-								}
-								case "tool_result": {
-									const { toolCallId, result, isError } = parsed;
-									const tc = state.toolCalls.get(toolCallId);
-									if (tc) {
-										tc.result = result;
-										tc.isError = isError;
-									}
-									updated = true;
-									break;
-								}
-								case "thinking_delta":
-									if (parsed.text) {
-										state.thinkingText += parsed.text;
-										updated = true;
-									}
-									break;
+							if (applySseEvent(state, currentEventType, parsed)) {
+								updated = true;
 							}
 						} catch {
 							// skip unparseable
@@ -137,14 +152,7 @@ export function useStreamReconnect(
 						...state,
 						toolCalls: new Map(state.toolCalls),
 					});
-					const vp = reconnectViewportRef.current;
-					if (vp) {
-						const nearBottom =
-							vp.scrollHeight - vp.scrollTop - vp.clientHeight < 80;
-						if (nearBottom) {
-							vp.scrollTo({ top: vp.scrollHeight });
-						}
-					}
+					scrollIfNearBottom(reconnectViewportRef.current);
 				}
 
 				if (state.done) break;

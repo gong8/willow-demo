@@ -173,38 +173,17 @@ chatRoutes.post("/stream", async (c) => {
 		return c.json({ error: "Conversation not found" }, 404);
 	}
 
-	// Reconnect to active stream
 	const existingStream = getStream(conversationId);
 	if (existingStream && existingStream.status === "streaming") {
 		return pipeStreamToSSE(c, conversationId);
 	}
 
-	// Trim orphaned messages if needed
-	if (expectedPriorCount !== undefined) {
-		const existing = await db.message.findMany({
-			where: { conversationId },
-			orderBy: { createdAt: "asc" },
-			select: { id: true },
-		});
-		if (existing.length > expectedPriorCount) {
-			const idsToDelete = existing.slice(expectedPriorCount).map((m) => m.id);
+	await trimOrphanedMessages(conversationId, expectedPriorCount);
 
-			// Detach attachments before deletion so they survive the cascade
-			await db.chatAttachment.updateMany({
-				where: { messageId: { in: idsToDelete } },
-				data: { messageId: null },
-			});
-
-			await db.message.deleteMany({ where: { id: { in: idsToDelete } } });
-		}
-	}
-
-	// Persist user message
 	const userMessage = await db.message.create({
 		data: { conversationId, role: "user", content: message },
 	});
 
-	// Link attachments to this message
 	if (attachmentIds && attachmentIds.length > 0) {
 		await db.chatAttachment.updateMany({
 			where: { id: { in: attachmentIds }, messageId: null },
@@ -212,19 +191,8 @@ chatRoutes.post("/stream", async (c) => {
 		});
 	}
 
-	// Auto-title from first message
-	const msgCount = await db.message.count({ where: { conversationId } });
-	if (msgCount === 1) {
-		const titleSource = message || "Image";
-		const title =
-			titleSource.length > 50 ? `${titleSource.slice(0, 50)}...` : titleSource;
-		await db.conversation.update({
-			where: { id: conversationId },
-			data: { title },
-		});
-	}
+	await autoTitle(conversationId, message);
 
-	// Load history with attachment disk paths
 	const history = await db.message.findMany({
 		where: { conversationId },
 		orderBy: { createdAt: "asc" },
@@ -235,48 +203,8 @@ chatRoutes.post("/stream", async (c) => {
 		},
 	});
 
-	// Collect image paths for CLI
-	const allImagePaths = history.flatMap((msg) =>
-		msg.attachments
-			.map((att) => att.diskPath)
-			.filter((p): p is string => p !== null),
-	);
-	const lastUserMsg = [...history].reverse().find((msg) => msg.role === "user");
-	const newImagePaths = lastUserMsg
-		? lastUserMsg.attachments
-				.map((att) => att.diskPath)
-				.filter((p): p is string => p !== null)
-		: [];
-
-	// Build resource context if resourceIds provided
-	let systemPrompt = CHAT_SYSTEM_PROMPT;
-	if (resourceIds && resourceIds.length > 0) {
-		const resources = await db.resource.findMany({
-			where: {
-				id: { in: resourceIds },
-				status: { in: ["ready", "indexed"] },
-			},
-			select: { id: true, name: true, extractedText: true },
-		});
-		if (resources.length > 0) {
-			const MAX_RESOURCE_TEXT = 30_000;
-			const resourceBlocks = resources
-				.filter(
-					(r): r is typeof r & { extractedText: string } =>
-						r.extractedText != null,
-				)
-				.map((r) => {
-					const text =
-						r.extractedText.length > MAX_RESOURCE_TEXT
-							? `${r.extractedText.slice(0, MAX_RESOURCE_TEXT)}\n[... truncated]`
-							: r.extractedText;
-					return `<resource id="${r.id}" name="${r.name}">\n${text}\n</resource>`;
-				});
-			if (resourceBlocks.length > 0) {
-				systemPrompt += `\n\n<attached_resources>\n${resourceBlocks.join("\n\n")}\n</attached_resources>`;
-			}
-		}
-	}
+	const { allImagePaths, newImagePaths } = collectImagePaths(history);
+	const systemPrompt = await buildSystemPrompt(resourceIds);
 
 	const cliStream = createAgenticStream({
 		chatOptions: {
@@ -320,6 +248,87 @@ chatRoutes.post("/maintenance/run", (c) => {
 	}
 	return c.json({ jobId: job.id });
 });
+
+async function trimOrphanedMessages(
+	conversationId: string,
+	expectedPriorCount: number | undefined,
+) {
+	if (expectedPriorCount === undefined) return;
+
+	const existing = await db.message.findMany({
+		where: { conversationId },
+		orderBy: { createdAt: "asc" },
+		select: { id: true },
+	});
+	if (existing.length <= expectedPriorCount) return;
+
+	const idsToDelete = existing.slice(expectedPriorCount).map((m) => m.id);
+	await db.chatAttachment.updateMany({
+		where: { messageId: { in: idsToDelete } },
+		data: { messageId: null },
+	});
+	await db.message.deleteMany({ where: { id: { in: idsToDelete } } });
+}
+
+async function autoTitle(conversationId: string, message: string) {
+	const msgCount = await db.message.count({ where: { conversationId } });
+	if (msgCount !== 1) return;
+
+	const titleSource = message || "Image";
+	const title =
+		titleSource.length > 50 ? `${titleSource.slice(0, 50)}...` : titleSource;
+	await db.conversation.update({
+		where: { id: conversationId },
+		data: { title },
+	});
+}
+
+type HistoryRow = {
+	role: string;
+	content: string;
+	attachments: { diskPath: string | null }[];
+};
+
+function collectImagePaths(history: HistoryRow[]) {
+	const diskPaths = (atts: { diskPath: string | null }[]) =>
+		atts.map((a) => a.diskPath).filter((p): p is string => p !== null);
+
+	const allImagePaths = history.flatMap((msg) => diskPaths(msg.attachments));
+	const lastUserMsg = [...history].reverse().find((msg) => msg.role === "user");
+	const newImagePaths = lastUserMsg ? diskPaths(lastUserMsg.attachments) : [];
+	return { allImagePaths, newImagePaths };
+}
+
+const MAX_RESOURCE_TEXT = 30_000;
+
+async function buildSystemPrompt(
+	resourceIds: string[] | undefined,
+): Promise<string> {
+	if (!resourceIds || resourceIds.length === 0) return CHAT_SYSTEM_PROMPT;
+
+	const resources = await db.resource.findMany({
+		where: {
+			id: { in: resourceIds },
+			status: { in: ["ready", "indexed"] },
+		},
+		select: { id: true, name: true, extractedText: true },
+	});
+
+	const resourceBlocks = resources
+		.filter(
+			(r): r is typeof r & { extractedText: string } => r.extractedText != null,
+		)
+		.map((r) => {
+			const text =
+				r.extractedText.length > MAX_RESOURCE_TEXT
+					? `${r.extractedText.slice(0, MAX_RESOURCE_TEXT)}\n[... truncated]`
+					: r.extractedText;
+			return `<resource id="${r.id}" name="${r.name}">\n${text}\n</resource>`;
+		});
+
+	if (resourceBlocks.length === 0) return CHAT_SYSTEM_PROMPT;
+	return `${CHAT_SYSTEM_PROMPT}\n\n<attached_resources>\n${resourceBlocks.join("\n\n")}\n</attached_resources>`;
+}
 
 function pipeStreamToSSE(
 	c: Parameters<typeof streamSSE>[0],

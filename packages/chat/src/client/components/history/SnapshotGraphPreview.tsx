@@ -1,11 +1,9 @@
 import { useQuery } from "@tanstack/react-query";
 import { useMemo } from "react";
-import { GraphCanvas } from "reagraph";
 import { fetchGraphAtCommit } from "../../lib/api.js";
 import { transformGraphData } from "../../lib/graph-transform.js";
 import type { NodeType, WillowGraph } from "../../lib/graph-types.js";
-import { NodeDetailPanel } from "../graph/NodeDetailPanel.js";
-import { useGraphSelection } from "./useGraphSelection.js";
+import { GraphPreviewShell } from "./GraphPreviewShell.js";
 
 const ALL_TYPES = new Set<NodeType>([
 	"root",
@@ -23,9 +21,6 @@ export function SnapshotGraphPreview({ hash }: { hash: string }) {
 		queryFn: () => fetchGraphAtCommit(hash),
 		staleTime: Number.POSITIVE_INFINITY,
 	});
-
-	const { selectedNodeId, selections, handleNodeClick, handleCanvasClick } =
-		useGraphSelection();
 
 	const { nodes, edges, stats } = useMemo(() => {
 		if (!graph) {
@@ -47,7 +42,7 @@ export function SnapshotGraphPreview({ hash }: { hash: string }) {
 		});
 	}, [graph]);
 
-	if (isLoading) {
+	if (isLoading || !graph) {
 		return (
 			<div className="flex flex-1 items-center justify-center text-sm text-muted-foreground">
 				Loading graph snapshot...
@@ -55,45 +50,19 @@ export function SnapshotGraphPreview({ hash }: { hash: string }) {
 		);
 	}
 
-	if (!graph || nodes.length === 0) {
-		return (
-			<div className="flex flex-1 items-center justify-center text-sm text-muted-foreground">
-				No graph data at this commit.
-			</div>
-		);
-	}
-
-	const selectedNode = selectedNodeId ? graph.nodes[selectedNodeId] : null;
-
 	return (
-		<div className="flex flex-1 flex-col overflow-hidden">
-			<div className="flex items-center gap-3 border-b border-border px-4 py-2 text-xs text-muted-foreground">
-				<span>{stats.nodeCount} nodes</span>
-				<span>{stats.treeEdgeCount} edges</span>
-				{stats.linkCount > 0 && <span>{stats.linkCount} links</span>}
-			</div>
-			<div className="flex flex-1 overflow-hidden">
-				<div className="relative flex-1">
-					<GraphCanvas
-						nodes={nodes}
-						edges={edges}
-						layoutType="forceDirected2d"
-						edgeArrowPosition="end"
-						labelType="all"
-						draggable
-						selections={selections}
-						onNodeClick={handleNodeClick}
-						onCanvasClick={handleCanvasClick}
-					/>
+		<GraphPreviewShell
+			nodes={nodes}
+			edges={edges}
+			graph={graph}
+			emptyMessage="No graph data at this commit."
+			header={
+				<div className="flex items-center gap-3 border-b border-border px-4 py-2 text-xs text-muted-foreground">
+					<span>{stats.nodeCount} nodes</span>
+					<span>{stats.treeEdgeCount} edges</span>
+					{stats.linkCount > 0 && <span>{stats.linkCount} links</span>}
 				</div>
-				{selectedNode && (
-					<NodeDetailPanel
-						node={selectedNode}
-						graph={graph}
-						onClose={handleCanvasClick}
-					/>
-				)}
-			</div>
-		</div>
+			}
+		/>
 	);
 }

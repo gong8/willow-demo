@@ -75,15 +75,13 @@ function runResolverPass(options: {
 		}
 
 		let toolCallCount = 0;
-
-		const emitter = (event: string) => {
+		const parser = createStreamParser((event: string) => {
 			if (event === "tool_call_start") {
 				toolCallCount++;
 				options.onAction?.();
 			}
-		};
+		});
 
-		const parser = createStreamParser(emitter);
 		proc.stdin?.end();
 		pipeStdout(proc, parser);
 

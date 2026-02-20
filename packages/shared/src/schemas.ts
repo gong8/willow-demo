@@ -17,6 +17,8 @@ export type CanonicalRelation = (typeof CANONICAL_RELATIONS)[number];
 const relationEnum = z.enum(CANONICAL_RELATIONS);
 const confidenceEnum = z.enum(["low", "medium", "high"]);
 const optionalMetadata = z.record(z.string()).optional();
+const nodeId = z.string().describe("ID of the node");
+const linkId = z.string().describe("ID of the link");
 
 const temporalMetadataSchema = z
 	.object({
@@ -57,7 +59,7 @@ const createNodeSchema = z.object({
 });
 
 const updateNodeSchema = z.object({
-	nodeId: z.string().describe("ID of the node to update"),
+	nodeId: nodeId.describe("ID of the node to update"),
 	content: z
 		.string()
 		.optional()
@@ -91,7 +93,7 @@ const searchNodesSchema = z.object({
 });
 
 const getContextSchema = z.object({
-	nodeId: z.string().describe("ID of the node to get context for"),
+	nodeId: nodeId.describe("ID of the node to get context for"),
 	depth: z
 		.number()
 		.int()
@@ -103,18 +105,18 @@ const getContextSchema = z.object({
 });
 
 const deleteNodeSchema = z.object({
-	nodeId: z
-		.string()
-		.describe("ID of the node to delete (cascades to all descendants)"),
+	nodeId: nodeId.describe(
+		"ID of the node to delete (cascades to all descendants)",
+	),
 });
 
 const updateLinkSchema = z.object({
-	linkId: z.string().describe("ID of the link to update"),
+	linkId: linkId.describe("ID of the link to update"),
 	...linkFieldsSchema.partial().shape,
 });
 
 const deleteLinkSchema = z.object({
-	linkId: z.string().describe("ID of the link to delete"),
+	linkId: linkId.describe("ID of the link to delete"),
 });
 
 const walkGraphSchema = z.object({
@@ -123,14 +125,12 @@ const walkGraphSchema = z.object({
 		.describe(
 			"Navigation action: 'start' begins at root, 'down' enters a child, 'up' backtracks to parent, 'follow_link' follows a cross-cutting link to the other endpoint, 'done' ends the search",
 		),
-	nodeId: z
-		.string()
+	nodeId: nodeId
 		.optional()
 		.describe(
 			"Target child node ID for 'down', current node ID for 'up' and 'follow_link'. Not needed for 'start' or 'done'.",
 		),
-	linkId: z
-		.string()
+	linkId: linkId
 		.optional()
 		.describe("Link ID to follow. Required for 'follow_link' action."),
 });
@@ -147,12 +147,13 @@ export const schemas = {
 	walkGraph: walkGraphSchema,
 };
 
-export type CreateNodeInput = z.infer<typeof createNodeSchema>;
-export type UpdateNodeInput = z.infer<typeof updateNodeSchema>;
-export type AddLinkInput = z.infer<typeof addLinkSchema>;
-export type UpdateLinkInput = z.infer<typeof updateLinkSchema>;
-export type SearchNodesInput = z.infer<typeof searchNodesSchema>;
-export type GetContextInput = z.infer<typeof getContextSchema>;
-export type DeleteNodeInput = z.infer<typeof deleteNodeSchema>;
-export type DeleteLinkInput = z.infer<typeof deleteLinkSchema>;
-export type WalkGraphInput = z.infer<typeof walkGraphSchema>;
+type Schemas = typeof schemas;
+export type CreateNodeInput = z.infer<Schemas["createNode"]>;
+export type UpdateNodeInput = z.infer<Schemas["updateNode"]>;
+export type AddLinkInput = z.infer<Schemas["addLink"]>;
+export type UpdateLinkInput = z.infer<Schemas["updateLink"]>;
+export type SearchNodesInput = z.infer<Schemas["searchNodes"]>;
+export type GetContextInput = z.infer<Schemas["getContext"]>;
+export type DeleteNodeInput = z.infer<Schemas["deleteNode"]>;
+export type DeleteLinkInput = z.infer<Schemas["deleteLink"]>;
+export type WalkGraphInput = z.infer<Schemas["walkGraph"]>;

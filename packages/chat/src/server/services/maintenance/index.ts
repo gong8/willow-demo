@@ -38,6 +38,14 @@ function getGraphPath(): string {
 	);
 }
 
+function tryOpen(graphPath: string): InstanceType<typeof JsGraphStore> | null {
+	try {
+		return JsGraphStore.open(graphPath);
+	} catch {
+		return null;
+	}
+}
+
 function ensureVcsInit(store: InstanceType<typeof JsGraphStore>): void {
 	try {
 		store.currentBranch();
@@ -57,38 +65,45 @@ function cleanupBranch(
 	mode: "merge" | "discard",
 ): void {
 	if (!originalBranch) return;
-	try {
-		const store = JsGraphStore.open(graphPath);
-		if (store.currentBranch() === branchName) {
-			if (mode === "discard") store.discardChanges();
-			store.switchBranch(originalBranch);
-		}
-		if (mode === "merge") {
-			try {
-				store.mergeBranch(branchName);
-			} catch {
-				/* merge conflict — changes stay on maintenance branch */
-			}
-		}
+	const store = tryOpen(graphPath);
+	if (!store) return;
+
+	if (store.currentBranch() === branchName) {
+		if (mode === "discard") store.discardChanges();
+		store.switchBranch(originalBranch);
+	}
+	if (mode === "merge") {
 		try {
-			store.deleteBranch(branchName);
+			store.mergeBranch(branchName);
 		} catch {
-			/* best effort cleanup */
+			/* merge conflict — changes stay on maintenance branch */
 		}
+	}
+	try {
+		store.deleteBranch(branchName);
 	} catch {
-		/* best effort */
+		/* best effort cleanup */
 	}
 }
 
-function handleSuccess(
+function completeJob(
 	job: MaintenanceJob,
-	report: MaintenanceReport,
+	result: { report: MaintenanceReport } | { error: Error },
 	graphPath: string,
 	branchName: string,
 	originalBranch: string | null,
 ): void {
-	job.status = "complete";
 	job.completedAt = new Date();
+
+	if ("error" in result) {
+		job.status = "error";
+		log.error("Job failed", { id: job.id, error: result.error.message });
+		cleanupBranch(graphPath, branchName, originalBranch, "discard");
+		return;
+	}
+
+	const { report } = result;
+	job.status = "complete";
 	log.info("Job complete", {
 		id: job.id,
 		preScanFindings: report.preScanFindings.length,
@@ -98,37 +113,26 @@ function handleSuccess(
 	});
 	conversationsSinceLastMaintenance = 0;
 
-	try {
-		const store = JsGraphStore.open(graphPath);
-		const commitResult = store.commitExternalChanges({
-			message: `Maintenance: ${job.trigger} (${report.resolverActions} actions)`,
-			source: "maintenance",
-			jobId: job.id,
-			conversationId: undefined,
-			summary: undefined,
-			toolName: undefined,
-		});
-		if (commitResult) {
-			log.info("Committed maintenance changes", { hash: commitResult });
+	const store = tryOpen(graphPath);
+	if (store) {
+		try {
+			const commitResult = store.commitExternalChanges({
+				message: `Maintenance: ${job.trigger} (${report.resolverActions} actions)`,
+				source: "maintenance",
+				jobId: job.id,
+				conversationId: undefined,
+				summary: undefined,
+				toolName: undefined,
+			});
+			if (commitResult) {
+				log.info("Committed maintenance changes", { hash: commitResult });
+			}
+		} catch {
+			log.warn("VCS commit failed after maintenance");
 		}
-	} catch {
-		log.warn("VCS commit failed after maintenance");
 	}
 
 	cleanupBranch(graphPath, branchName, originalBranch, "merge");
-}
-
-function handleError(
-	job: MaintenanceJob,
-	error: Error,
-	graphPath: string,
-	branchName: string,
-	originalBranch: string | null,
-): void {
-	job.status = "error";
-	job.completedAt = new Date();
-	log.error("Job failed", { id: job.id, error: error.message });
-	cleanupBranch(graphPath, branchName, originalBranch, "discard");
 }
 
 export function runMaintenance(options: {
@@ -171,10 +175,16 @@ export function runMaintenance(options: {
 		},
 	})
 		.then((report) =>
-			handleSuccess(job, report, graphPath, branchName, originalBranch),
+			completeJob(job, { report }, graphPath, branchName, originalBranch),
 		)
 		.catch((e) =>
-			handleError(job, e as Error, graphPath, branchName, originalBranch),
+			completeJob(
+				job,
+				{ error: e as Error },
+				graphPath,
+				branchName,
+				originalBranch,
+			),
 		);
 
 	return job;

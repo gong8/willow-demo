@@ -1,7 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import { X } from "lucide-react";
 import { useMemo } from "react";
-import { GraphCanvas } from "reagraph";
 import {
 	type ChangeSummary,
 	diffCommits,
@@ -18,8 +17,7 @@ import type {
 	NodeType,
 	WillowGraph,
 } from "../../lib/graph-types.js";
-import { NodeDetailPanel } from "../graph/NodeDetailPanel.js";
-import { useGraphSelection } from "./useGraphSelection.js";
+import { GraphPreviewShell } from "./GraphPreviewShell.js";
 
 const DIFF_COLORS = {
 	added: "#22c55e",
@@ -103,6 +101,18 @@ function buildDiffGraph(
 	return { nodes, edges };
 }
 
+function DiffLegendDot({ color, label }: { color: string; label: string }) {
+	return (
+		<span className="flex items-center gap-1">
+			<span
+				className="inline-block h-2 w-2 rounded-full"
+				style={{ backgroundColor: color }}
+			/>
+			{label}
+		</span>
+	);
+}
+
 export function CompareView({
 	fromHash,
 	toHash,
@@ -123,22 +133,10 @@ export function CompareView({
 		queryFn: () => diffCommits(fromHash, toHash),
 	});
 
-	const { selectedNodeId, selections, handleNodeClick, handleCanvasClick } =
-		useGraphSelection();
-
 	const { nodes, edges } = useMemo(() => {
 		if (!toGraph || !diff) return { nodes: [], edges: [] };
 		return buildDiffGraph(toGraph, diff);
 	}, [toGraph, diff]);
-
-	const totalChanges = diff
-		? diff.nodesCreated.length +
-			diff.nodesUpdated.length +
-			diff.nodesDeleted.length +
-			diff.linksCreated.length +
-			diff.linksRemoved.length +
-			(diff.linksUpdated?.length ?? 0)
-		: 0;
 
 	if (isLoading || !diff || !toGraph) {
 		return (
@@ -148,91 +146,46 @@ export function CompareView({
 		);
 	}
 
-	const selectedNode =
-		selectedNodeId && toGraph ? toGraph.nodes[selectedNodeId] : null;
-
 	return (
-		<div className="flex flex-1 flex-col overflow-hidden">
-			{/* Header */}
-			<div className="flex items-center gap-3 border-b border-border px-4 py-2">
-				<span className="text-sm font-medium text-foreground">
-					Comparing{" "}
-					<span className="font-mono text-xs">{fromHash.slice(0, 7)}</span>
-					{" → "}
-					<span className="font-mono text-xs">{toHash.slice(0, 7)}</span>
-				</span>
+		<GraphPreviewShell
+			nodes={nodes}
+			edges={edges}
+			graph={toGraph}
+			emptyMessage="No differences between these commits."
+			header={
+				<div className="flex items-center gap-3 border-b border-border px-4 py-2">
+					<span className="text-sm font-medium text-foreground">
+						Comparing{" "}
+						<span className="font-mono text-xs">{fromHash.slice(0, 7)}</span>
+						{" → "}
+						<span className="font-mono text-xs">{toHash.slice(0, 7)}</span>
+					</span>
 
-				<div className="flex items-center gap-3 text-xs text-muted-foreground">
-					<span className="flex items-center gap-1">
-						<span
-							className="inline-block h-2 w-2 rounded-full"
-							style={{ backgroundColor: DIFF_COLORS.added }}
+					<div className="flex items-center gap-3 text-xs text-muted-foreground">
+						<DiffLegendDot
+							color={DIFF_COLORS.added}
+							label={`${diff.nodesCreated.length} added`}
 						/>
-						{diff.nodesCreated.length} added
-					</span>
-					<span className="flex items-center gap-1">
-						<span
-							className="inline-block h-2 w-2 rounded-full"
-							style={{ backgroundColor: DIFF_COLORS.modified }}
+						<DiffLegendDot
+							color={DIFF_COLORS.modified}
+							label={`${diff.nodesUpdated.length} modified`}
 						/>
-						{diff.nodesUpdated.length} modified
-					</span>
-					<span className="flex items-center gap-1">
-						<span
-							className="inline-block h-2 w-2 rounded-full"
-							style={{ backgroundColor: DIFF_COLORS.deleted }}
+						<DiffLegendDot
+							color={DIFF_COLORS.deleted}
+							label={`${diff.nodesDeleted.length} deleted`}
 						/>
-						{diff.nodesDeleted.length} deleted
-					</span>
-					<span className="flex items-center gap-1">
-						<span
-							className="inline-block h-2 w-2 rounded-full"
-							style={{ backgroundColor: DIFF_COLORS.unchanged }}
-						/>
-						unchanged
-					</span>
-				</div>
-
-				<button
-					type="button"
-					onClick={onClose}
-					className="ml-auto rounded p-1 text-muted-foreground hover:text-foreground"
-				>
-					<X className="h-4 w-4" />
-				</button>
-			</div>
-
-			{/* Graph */}
-			{totalChanges === 0 ? (
-				<div className="flex flex-1 items-center justify-center text-sm text-muted-foreground">
-					No differences between these commits.
-				</div>
-			) : (
-				<div className="flex flex-1 overflow-hidden">
-					<div className="relative flex-1">
-						{nodes.length > 0 && (
-							<GraphCanvas
-								nodes={nodes}
-								edges={edges}
-								layoutType="forceDirected2d"
-								edgeArrowPosition="end"
-								labelType="all"
-								draggable
-								selections={selections}
-								onNodeClick={handleNodeClick}
-								onCanvasClick={handleCanvasClick}
-							/>
-						)}
+						<DiffLegendDot color={DIFF_COLORS.unchanged} label="unchanged" />
 					</div>
-					{selectedNode && (
-						<NodeDetailPanel
-							node={selectedNode}
-							graph={toGraph}
-							onClose={handleCanvasClick}
-						/>
-					)}
+
+					<button
+						type="button"
+						onClick={onClose}
+						className="ml-auto rounded p-1 text-muted-foreground hover:text-foreground"
+					>
+						<X className="h-4 w-4" />
+					</button>
 				</div>
-			)}
-		</div>
+			}
+		/>
 	);
 }

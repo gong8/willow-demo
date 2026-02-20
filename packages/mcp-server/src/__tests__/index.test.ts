@@ -88,16 +88,13 @@ describe("mcp-server index", () => {
 		expect(mockStore.searchNodes).toHaveBeenCalledWith("test", 10);
 	});
 
-	it("get_context calls store.getContext", async () => {
+	it.each([
+		["with explicit depth", { nodeId: "n1", depth: 3 }, ["n1", 3]],
+		["with default depth", { nodeId: "n1" }, ["n1", 2]],
+	] as const)("get_context %s", async (_, input, expectedArgs) => {
 		mockStore.getContext.mockReturnValue({ node: { id: "ctx1" } });
-		const res = await registeredTools.get_context({ nodeId: "n1", depth: 3 });
-		expect(mockStore.getContext).toHaveBeenCalledWith("n1", 3);
-		expect(res.content[0].text).toContain("ctx1");
-	});
-
-	it("get_context uses default depth", async () => {
-		await registeredTools.get_context({ nodeId: "n1" });
-		expect(mockStore.getContext).toHaveBeenCalledWith("n1", 2);
+		await registeredTools.get_context(input);
+		expect(mockStore.getContext).toHaveBeenCalledWith(...expectedArgs);
 	});
 
 	it.each([

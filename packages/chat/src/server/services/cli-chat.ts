@@ -33,24 +33,24 @@ async function resizeImagesForCli(
 	images: string[],
 	dir: string,
 ): Promise<string[]> {
-	const resized: string[] = [];
-	for (let i = 0; i < images.length; i++) {
-		const outPath = join(dir, `image_${i}.jpg`);
-		try {
-			await sharp(images[i])
-				.resize(CLI_IMAGE_MAX_DIM, CLI_IMAGE_MAX_DIM, {
-					fit: "inside",
-					withoutEnlargement: true,
-				})
-				.jpeg({ quality: CLI_IMAGE_QUALITY })
-				.toFile(outPath);
-			resized.push(outPath);
-		} catch {
-			log.warn("Image resize failed", { index: i });
-			resized.push(images[i]);
-		}
-	}
-	return resized;
+	return Promise.all(
+		images.map(async (src, i) => {
+			const outPath = join(dir, `image_${i}.jpg`);
+			try {
+				await sharp(src)
+					.resize(CLI_IMAGE_MAX_DIM, CLI_IMAGE_MAX_DIM, {
+						fit: "inside",
+						withoutEnlargement: true,
+					})
+					.jpeg({ quality: CLI_IMAGE_QUALITY })
+					.toFile(outPath);
+				return outPath;
+			} catch {
+				log.warn("Image resize failed", { index: i });
+				return src;
+			}
+		}),
+	);
 }
 
 export function writeTempFile(
@@ -141,10 +141,19 @@ export interface CoordinatorConfig {
 	mcpServerPath: string;
 }
 
-function writeCoordinatorMcp(dir: string, config: CoordinatorConfig): string {
-	const graphPath =
+function getGraphPath(): string {
+	return (
 		process.env.WILLOW_GRAPH_PATH ||
-		join(process.env.HOME || "~", ".willow", "graph.json");
+		join(process.env.HOME || "~", ".willow", "graph.json")
+	);
+}
+
+function nodeStdioServer(scriptPath: string): Record<string, unknown> {
+	return { type: "stdio", command: "node", args: [scriptPath] };
+}
+
+function writeCoordinatorMcp(dir: string, config: CoordinatorConfig): string {
+	const graphPath = getGraphPath();
 
 	const script = `#!/usr/bin/env node
 const { spawn } = require("child_process");
@@ -379,35 +388,22 @@ export function writeMcpConfig(
 		coordinator?: CoordinatorConfig;
 	},
 ): string {
-	const graphPath =
-		process.env.WILLOW_GRAPH_PATH ||
-		join(process.env.HOME || "~", ".willow", "graph.json");
-
 	const servers: Record<string, unknown> = {
 		willow: {
-			type: "stdio",
-			command: "node",
-			args: [mcpServerPath],
-			env: { WILLOW_GRAPH_PATH: graphPath },
+			...nodeStdioServer(mcpServerPath),
+			env: { WILLOW_GRAPH_PATH: getGraphPath() },
 		},
 	};
 
-	if (options?.imagePaths && options.imagePaths.length > 0) {
-		const scriptPath = writeImageViewerMcp(dir, options.imagePaths);
-		servers.images = {
-			type: "stdio",
-			command: "node",
-			args: [scriptPath],
-		};
+	if (options?.imagePaths?.length) {
+		servers.images = nodeStdioServer(
+			writeImageViewerMcp(dir, options.imagePaths),
+		);
 	}
-
 	if (options?.coordinator) {
-		const coordinatorPath = writeCoordinatorMcp(dir, options.coordinator);
-		servers.coordinator = {
-			type: "stdio",
-			command: "node",
-			args: [coordinatorPath],
-		};
+		servers.coordinator = nodeStdioServer(
+			writeCoordinatorMcp(dir, options.coordinator),
+		);
 	}
 
 	return writeTempFile(
@@ -422,26 +418,11 @@ export function writeSystemPrompt(
 	content: string,
 	options?: { allowWebTools?: boolean },
 ): string {
-	const constraints = options?.allowWebTools
-		? [
-				"",
-				"IMPORTANT CONSTRAINTS:",
-				"- Only use MCP tools prefixed with mcp__willow__ or mcp__coordinator__ to manage the knowledge graph and search memories.",
-				"- You may use WebSearch and WebFetch to look up information on the web when helpful.",
-				"- When you need to perform multiple knowledge graph operations, make all tool calls in parallel within a single response.",
-			]
-		: [
-				"",
-				"IMPORTANT CONSTRAINTS:",
-				"- Only use MCP tools prefixed with mcp__willow__ to manage the knowledge graph.",
-				"- Never attempt to use filesystem, code editing, web browsing, or any non-MCP tools.",
-				"- When you need to perform multiple knowledge graph operations, make all tool calls in parallel within a single response.",
-			];
-	return writeTempFile(
-		dir,
-		"system-prompt.txt",
-		content + constraints.join("\n"),
-	);
+	const toolLine = options?.allowWebTools
+		? "- Only use MCP tools prefixed with mcp__willow__ or mcp__coordinator__ to manage the knowledge graph and search memories.\n- You may use WebSearch and WebFetch to look up information on the web when helpful."
+		: "- Only use MCP tools prefixed with mcp__willow__ to manage the knowledge graph.\n- Never attempt to use filesystem, code editing, web browsing, or any non-MCP tools.";
+	const suffix = `\nIMPORTANT CONSTRAINTS:\n${toolLine}\n- When you need to perform multiple knowledge graph operations, make all tool calls in parallel within a single response.`;
+	return writeTempFile(dir, "system-prompt.txt", content + suffix);
 }
 
 interface CliMessage {
@@ -479,27 +460,15 @@ export interface CliChatOptions {
 function buildPrompt(messages: CliMessage[], newImages?: string[]): string {
 	const parts: string[] = [];
 	for (const msg of messages) {
-		switch (msg.role) {
-			case "system":
-				break;
-			case "assistant":
-				parts.push(`<previous_response>\n${msg.content}\n</previous_response>`);
-				break;
-			case "user":
-				parts.push(msg.content);
-				break;
-		}
+		if (msg.role === "assistant")
+			parts.push(`<previous_response>\n${msg.content}\n</previous_response>`);
+		else if (msg.role === "user") parts.push(msg.content);
 	}
 
-	if (newImages && newImages.length > 0) {
+	if (newImages?.length) {
 		const imageList = newImages.map((p) => `  - ${p}`).join("\n");
 		parts.push(
-			[
-				"<attached_images>",
-				"The user has attached new images. Use the mcp__images__view_image tool to view each image:",
-				imageList,
-				"</attached_images>",
-			].join("\n"),
+			`<attached_images>\nThe user has attached new images. Use the mcp__images__view_image tool to view each image:\n${imageList}\n</attached_images>`,
 		);
 	}
 
@@ -551,10 +520,15 @@ function extractToolResultText(
 	return "";
 }
 
-function emitToolResultsFromContent(
-	content: Array<Record<string, unknown>> | undefined,
+function emitUserToolResults(
+	msg: Record<string, unknown>,
 	emitSSE: SSEEmitter,
 ): void {
+	const message = msg.message as Record<string, unknown> | undefined;
+	const content =
+		message?.role === "user"
+			? (message.content as Array<Record<string, unknown>> | undefined)
+			: undefined;
 	if (!content) return;
 	for (const block of content) {
 		if (block.type !== "tool_result") continue;
@@ -567,19 +541,6 @@ function emitToolResultsFromContent(
 				),
 				isError: block.is_error === true,
 			}),
-		);
-	}
-}
-
-function emitUserToolResults(
-	msg: Record<string, unknown>,
-	emitSSE: SSEEmitter,
-): void {
-	const message = msg.message as Record<string, unknown> | undefined;
-	if (message?.role === "user") {
-		emitToolResultsFromContent(
-			message.content as Array<Record<string, unknown>> | undefined,
-			emitSSE,
 		);
 	}
 }
@@ -651,20 +612,20 @@ export function createStreamParser(emitSSE: SSEEmitter) {
 
 	function processEvent(event: Record<string, unknown>): void {
 		const index = event.index as number;
-		const block =
-			event.type === "content_block_start"
-				? (event.content_block as Record<string, unknown>)
-				: undefined;
-		const delta =
-			event.type === "content_block_delta"
-				? (event.delta as Record<string, unknown>)
-				: undefined;
-
-		if (block) handleBlockStart(index, block);
-		else if (delta) handleBlockDelta(index, delta);
-		else if (event.type === "content_block_stop") handleBlockStop(index);
-		else if (event.type === "message_start")
-			emitUserToolResults(event, emitSSE);
+		switch (event.type as string) {
+			case "content_block_start":
+				handleBlockStart(index, event.content_block as Record<string, unknown>);
+				break;
+			case "content_block_delta":
+				handleBlockDelta(index, event.delta as Record<string, unknown>);
+				break;
+			case "content_block_stop":
+				handleBlockStop(index);
+				break;
+			case "message_start":
+				emitUserToolResults(event, emitSSE);
+				break;
+		}
 	}
 
 	return {
@@ -747,43 +708,48 @@ function wireProcessLifecycle(
 	signal?: AbortSignal,
 ): Promise<void> {
 	proc.stdin?.end();
-
-	if (signal) {
-		signal.addEventListener("abort", () => {
-			proc.kill("SIGTERM");
-		});
-	}
-
-	let closed = false;
-	const finalize = (emitError?: string): void => {
-		if (closed) return;
-		closed = true;
-		if (emitError) emitSSE("error", JSON.stringify({ error: emitError }));
-		emitSSE("done", "[DONE]");
-	};
+	signal?.addEventListener("abort", () => proc.kill("SIGTERM"));
 
 	pipeStdout(proc, parser);
-
 	proc.stderr?.on("data", (chunk: Buffer) => {
 		const text = chunk.toString().trim();
 		if (text) log.debug("stderr", { text: text.slice(0, 1000) });
 	});
 
+	let done = false;
+	const finish = (errorMsg?: string): void => {
+		if (done) return;
+		done = true;
+		if (errorMsg) emitSSE("error", JSON.stringify({ error: errorMsg }));
+		emitSSE("done", "[DONE]");
+		cleanupDir(invocationDir);
+	};
+
 	return new Promise((resolve) => {
 		proc.on("close", () => {
 			log.info("Process closed");
-			finalize();
-			cleanupDir(invocationDir);
+			finish();
 			resolve();
 		});
-
 		proc.on("error", (err) => {
 			log.error("Process error");
-			finalize(err.message);
-			cleanupDir(invocationDir);
+			finish(err.message);
 			resolve();
 		});
 	});
+}
+
+function mapNewImagePaths(
+	originals: string[],
+	resized: string[],
+	newImages: string[],
+): string[] | undefined {
+	if (!newImages.length) return undefined;
+	const newSet = new Set(newImages);
+	const mapped = originals
+		.map((orig, i) => (newSet.has(orig) ? resized[i] : null))
+		.filter((p): p is string => p !== null);
+	return mapped.length ? mapped : undefined;
 }
 
 async function prepareInvocation(options: CliChatOptions): Promise<{
@@ -797,31 +763,18 @@ async function prepareInvocation(options: CliChatOptions): Promise<{
 		{ allowWebTools: options.allowWebTools },
 	);
 	const model = getCliModel(options.model ?? LLM_MODEL);
-	const hasImages = options.images && options.images.length > 0;
+	const origImages = options.images ?? [];
+	const cliImagePaths = origImages.length
+		? await resizeImagesForCli(origImages, invocationDir)
+		: origImages;
+	const cliNewImagePaths = origImages.length
+		? mapNewImagePaths(origImages, cliImagePaths, options.newImages ?? [])
+		: undefined;
 
-	let cliImagePaths = options.images;
-	if (hasImages) {
-		cliImagePaths = await resizeImagesForCli(
-			options.images ?? [],
-			invocationDir,
-		);
-	}
-
-	// Build a map from original path → resized path so we can find new images
-	const newImageSet = new Set(options.newImages ?? []);
-	const cliNewImagePaths =
-		hasImages && options.newImages?.length
-			? (options.images ?? [])
-					.map((orig, i) => (newImageSet.has(orig) ? cliImagePaths?.[i] : null))
-					.filter((p): p is string => p !== null)
-			: undefined;
-
-	// MCP config gets ALL images so Claude can re-view if needed
 	const mcpConfigPath = writeMcpConfig(invocationDir, options.mcpServerPath, {
-		imagePaths: cliImagePaths,
+		imagePaths: cliImagePaths.length ? cliImagePaths : undefined,
 		coordinator: options.coordinator,
 	});
-	// Prompt only instructs Claude to view NEW images
 	const prompt =
 		buildPrompt(options.messages, cliNewImagePaths) ||
 		(cliNewImagePaths?.length ? "Describe this image." : "Hello");

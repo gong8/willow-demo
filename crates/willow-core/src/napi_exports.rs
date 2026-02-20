@@ -6,6 +6,12 @@ use std::collections::HashMap;
 use std::path::Path;
 use tracing::{info, debug};
 
+macro_rules! repo_op {
+    ($self:expr, $op:expr) => {
+        $op($self.repo()?).map_err(napi::Error::from)
+    };
+}
+
 // ---- DTO structs ----
 
 #[napi(object)]
@@ -207,18 +213,16 @@ fn link_to_js(link: &model::Link) -> JsLink {
     }
 }
 
+fn parse_rfc3339(s: &Option<String>) -> Option<chrono::DateTime<chrono::Utc>> {
+    s.as_ref()
+        .and_then(|s| chrono::DateTime::parse_from_rfc3339(s).ok())
+        .map(|d| d.with_timezone(&chrono::Utc))
+}
+
 fn js_temporal_to_model(t: &JsTemporalMetadata) -> model::TemporalMetadata {
     model::TemporalMetadata {
-        valid_from: t
-            .valid_from
-            .as_ref()
-            .and_then(|s| chrono::DateTime::parse_from_rfc3339(s).ok())
-            .map(|d| d.with_timezone(&chrono::Utc)),
-        valid_until: t
-            .valid_until
-            .as_ref()
-            .and_then(|s| chrono::DateTime::parse_from_rfc3339(s).ok())
-            .map(|d| d.with_timezone(&chrono::Utc)),
+        valid_from: parse_rfc3339(&t.valid_from),
+        valid_until: parse_rfc3339(&t.valid_until),
         label: t.label.clone(),
     }
 }
@@ -308,14 +312,18 @@ fn diff_has_changes(diff: &vcs::diff::ChangeSummary) -> bool {
         || !diff.links_updated.is_empty()
 }
 
+fn map_vec<T, U>(items: &[T], f: fn(&T) -> U) -> Vec<U> {
+    items.iter().map(f).collect()
+}
+
 fn change_summary_to_js(diff: &vcs::diff::ChangeSummary) -> JsChangeSummary {
     JsChangeSummary {
-        nodes_created: diff.nodes_created.iter().map(node_change_to_js).collect(),
-        nodes_updated: diff.nodes_updated.iter().map(node_change_to_js).collect(),
-        nodes_deleted: diff.nodes_deleted.iter().map(node_change_to_js).collect(),
-        links_created: diff.links_created.iter().map(link_change_to_js).collect(),
-        links_removed: diff.links_removed.iter().map(link_change_to_js).collect(),
-        links_updated: diff.links_updated.iter().map(link_change_to_js).collect(),
+        nodes_created: map_vec(&diff.nodes_created, node_change_to_js),
+        nodes_updated: map_vec(&diff.nodes_updated, node_change_to_js),
+        nodes_deleted: map_vec(&diff.nodes_deleted, node_change_to_js),
+        links_created: map_vec(&diff.links_created, link_change_to_js),
+        links_removed: map_vec(&diff.links_removed, link_change_to_js),
+        links_updated: map_vec(&diff.links_updated, link_change_to_js),
     }
 }
 
@@ -368,11 +376,10 @@ impl JsGraphStore {
         max_results: Option<u32>,
     ) -> Vec<JsSearchResult> {
         debug!(query = %query, "search_nodes");
-        self.inner
-            .search_nodes(&query, max_results.map(|n| n as usize))
-            .iter()
-            .map(search_result_to_js)
-            .collect()
+        map_vec(
+            &self.inner.search_nodes(&query, max_results.map(|n| n as usize)),
+            search_result_to_js,
+        )
     }
 
     #[napi]
@@ -382,16 +389,12 @@ impl JsGraphStore {
         depth: Option<u32>,
     ) -> napi::Result<JsContextResult> {
         debug!(node_id = %node_id, "get_context");
-        let ctx = self
-            .inner
-            .get_context(&node_id, depth)
-            .map_err(napi::Error::from)?;
-
+        let ctx = self.inner.get_context(&node_id, depth).map_err(napi::Error::from)?;
         Ok(JsContextResult {
             node: node_to_js(&ctx.node),
-            ancestors: ctx.ancestors.iter().map(node_to_js).collect(),
-            descendants: ctx.descendants.iter().map(node_to_js).collect(),
-            links: ctx.links.iter().map(link_to_js).collect(),
+            ancestors: map_vec(&ctx.ancestors, node_to_js),
+            descendants: map_vec(&ctx.descendants, node_to_js),
+            links: map_vec(&ctx.links, link_to_js),
         })
     }
 
@@ -434,10 +437,7 @@ impl JsGraphStore {
     #[napi]
     pub fn delete_node(&mut self, node_id: String) -> napi::Result<()> {
         info!(node_id = %node_id, "delete_node");
-        self.inner
-            .delete_node(&node_id)
-            .map_err(napi::Error::from)?;
-        Ok(())
+        self.inner.delete_node(&node_id).map_err(napi::Error::from)
     }
 
     #[napi]
@@ -500,17 +500,14 @@ impl JsGraphStore {
     #[napi]
     pub fn commit(&mut self, input: JsCommitInput) -> napi::Result<String> {
         info!(message = %input.message, "commit");
-        let commit_input = js_input_to_commit_input(input);
-        let hash = self.inner.commit(commit_input).map_err(napi::Error::from)?;
+        let hash = self.inner.commit(js_input_to_commit_input(input)).map_err(napi::Error::from)?;
         Ok(hash.0)
     }
 
     #[napi]
     pub fn commit_external_changes(&self, input: JsCommitInput) -> napi::Result<Option<String>> {
-        let commit_input = js_input_to_commit_input(input);
-        let hash = self
-            .inner
-            .commit_external_changes(commit_input)
+        let hash = self.inner
+            .commit_external_changes(js_input_to_commit_input(input))
             .map_err(napi::Error::from)?;
         Ok(hash.map(|h| h.0))
     }
@@ -524,26 +521,17 @@ impl JsGraphStore {
     #[napi]
     pub fn log(&self, limit: Option<u32>) -> napi::Result<Vec<JsCommitEntry>> {
         debug!("log");
-        let repo = self.repo()?;
-        let entries = repo
-            .log(limit.map(|n| n as usize))
-            .map_err(napi::Error::from)?;
-        Ok(entries.iter().map(commit_entry_to_js).collect())
+        let entries = repo_op!(self, |r: &vcs::repository::Repository| r.log(limit.map(|n| n as usize)))?;
+        Ok(map_vec(&entries, commit_entry_to_js))
     }
 
     #[napi]
     pub fn show_commit(&self, hash: String) -> napi::Result<JsCommitDetail> {
         debug!(hash = %hash, "show_commit");
-        let repo = self.repo()?;
         let commit_hash = vcs::types::CommitHash(hash);
-        let (data, diff) = repo.show_commit(&commit_hash).map_err(napi::Error::from)?;
-
-        let entry = vcs::types::CommitEntry {
-            hash: commit_hash,
-            data,
-        };
+        let (data, diff) = repo_op!(self, |r: &vcs::repository::Repository| r.show_commit(&commit_hash))?;
         Ok(JsCommitDetail {
-            commit: commit_entry_to_js(&entry),
+            commit: commit_entry_to_js(&vcs::types::CommitEntry { hash: commit_hash, data }),
             diff: change_summary_to_js(&diff),
         })
     }
@@ -551,21 +539,17 @@ impl JsGraphStore {
     #[napi]
     pub fn diff(&self, from_hash: String, to_hash: String) -> napi::Result<JsChangeSummary> {
         debug!(from = %from_hash, to = %to_hash, "diff");
-        let repo = self.repo()?;
-        let diff = repo
-            .diff(
-                &vcs::types::CommitHash(from_hash),
-                &vcs::types::CommitHash(to_hash),
-            )
-            .map_err(napi::Error::from)?;
+        let diff = repo_op!(self, |r: &vcs::repository::Repository| r.diff(
+            &vcs::types::CommitHash(from_hash),
+            &vcs::types::CommitHash(to_hash),
+        ))?;
         Ok(change_summary_to_js(&diff))
     }
 
     #[napi]
     pub fn list_branches(&self) -> napi::Result<Vec<JsBranchInfo>> {
         debug!("list_branches");
-        let repo = self.repo()?;
-        let branches = repo.list_branches().map_err(napi::Error::from)?;
+        let branches = repo_op!(self, |r: &vcs::repository::Repository| r.list_branches())?;
         Ok(branches
             .iter()
             .map(|b| JsBranchInfo {
@@ -579,8 +563,7 @@ impl JsGraphStore {
     #[napi]
     pub fn create_branch(&self, name: String) -> napi::Result<()> {
         debug!(name = %name, "create_branch");
-        let repo = self.repo()?;
-        repo.create_branch(&name).map_err(napi::Error::from)
+        repo_op!(self, |r: &vcs::repository::Repository| r.create_branch(&name))
     }
 
     #[napi]
@@ -592,15 +575,13 @@ impl JsGraphStore {
     #[napi]
     pub fn delete_branch(&self, name: String) -> napi::Result<()> {
         debug!(name = %name, "delete_branch");
-        let repo = self.repo()?;
-        repo.delete_branch(&name).map_err(napi::Error::from)
+        repo_op!(self, |r: &vcs::repository::Repository| r.delete_branch(&name))
     }
 
     #[napi]
     pub fn current_branch(&self) -> napi::Result<Option<String>> {
         debug!("current_branch");
-        let repo = self.repo()?;
-        repo.current_branch().map_err(napi::Error::from)
+        repo_op!(self, |r: &vcs::repository::Repository| r.current_branch())
     }
 
     #[napi]
@@ -621,36 +602,33 @@ impl JsGraphStore {
             .map_err(napi::Error::from)
     }
 
+    fn head_entry(&self) -> napi::Result<Option<vcs::types::CommitEntry>> {
+        let entries = repo_op!(self, |r: &vcs::repository::Repository| r.log(Some(1)))?;
+        Ok(entries.into_iter().next())
+    }
+
     #[napi]
     pub fn head_hash(&self) -> napi::Result<Option<String>> {
         debug!("head_hash");
-        let repo = self.repo()?;
-        let entries = repo.log(Some(1)).map_err(napi::Error::from)?;
-        Ok(entries.first().map(|e| e.hash.0.clone()))
+        Ok(self.head_entry()?.map(|e| e.hash.0))
     }
 
     #[napi]
     pub fn has_local_changes(&self) -> napi::Result<bool> {
         debug!("has_local_changes");
-        let repo = self.repo()?;
-        let entries = repo.log(Some(1)).map_err(napi::Error::from)?;
-        let head = match entries.first() {
-            Some(e) => &e.hash,
+        let head = match self.head_entry()? {
+            Some(e) => e.hash,
             None => return Ok(false),
         };
-        let committed_graph = repo.reconstruct_at(head).map_err(napi::Error::from)?;
-        let diff = crate::vcs::diff::compute_graph_diff(&committed_graph, &self.inner.graph);
-        Ok(diff_has_changes(&diff))
+        let committed = repo_op!(self, |r: &vcs::repository::Repository| r.reconstruct_at(&head))?;
+        Ok(diff_has_changes(&crate::vcs::diff::compute_graph_diff(&committed, &self.inner.graph)))
     }
 
     #[napi]
     pub fn graph_at_commit(&self, hash: String) -> napi::Result<String> {
         debug!(hash = %hash, "graph_at_commit");
-        let repo = self.repo()?;
-        let graph = repo.reconstruct_at(&vcs::types::CommitHash(hash))
-            .map_err(napi::Error::from)?;
-        serde_json::to_string(&graph)
-            .map_err(|e| napi::Error::from_reason(e.to_string()))
+        let graph = repo_op!(self, |r: &vcs::repository::Repository| r.reconstruct_at(&vcs::types::CommitHash(hash)))?;
+        serde_json::to_string(&graph).map_err(|e| napi::Error::from_reason(e.to_string()))
     }
 
     #[napi]
@@ -663,21 +641,15 @@ impl JsGraphStore {
         Ok(new_hash.0)
     }
 
-    /// Diff the on-disk graph file against the HEAD commit.
-    /// Returns the change summary (empty if identical or no HEAD).
     #[napi]
     pub fn diff_disk_vs_head(&self) -> napi::Result<JsChangeSummary> {
         debug!("diff_disk_vs_head");
-        let repo = self.repo()?;
-        let entries = repo.log(Some(1)).map_err(napi::Error::from)?;
-        let head = match entries.first() {
-            Some(e) => &e.hash,
+        let head = match self.head_entry()? {
+            Some(e) => e.hash,
             None => return Ok(JsChangeSummary::default()),
         };
-        let committed = repo.reconstruct_at(head).map_err(napi::Error::from)?;
-        let disk = crate::storage::load_graph(&self.inner.path)
-            .map_err(napi::Error::from)?;
-        let diff = crate::vcs::diff::compute_graph_diff(&committed, &disk);
-        Ok(change_summary_to_js(&diff))
+        let committed = repo_op!(self, |r: &vcs::repository::Repository| r.reconstruct_at(&head))?;
+        let disk = crate::storage::load_graph(&self.inner.path).map_err(napi::Error::from)?;
+        Ok(change_summary_to_js(&crate::vcs::diff::compute_graph_diff(&committed, &disk)))
     }
 }

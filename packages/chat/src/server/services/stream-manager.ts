@@ -308,41 +308,6 @@ export interface SubscribeHandle {
 	delivered: Promise<void>;
 }
 
-function createEventQueue(cb: SSEEmitter, onDrained: () => void) {
-	const queue: BufferedEvent[] = [];
-	let draining = false;
-	let active = true;
-
-	async function drain() {
-		if (draining) return;
-		draining = true;
-		while (queue.length > 0 && active) {
-			const evt = queue.shift();
-			if (!evt) break;
-			try {
-				await cb(evt.event, evt.data);
-			} catch {
-				// subscriber errored
-			}
-		}
-		draining = false;
-		onDrained();
-	}
-
-	return {
-		enqueue(event: string, data: string) {
-			queue.push({ event, data });
-			drain();
-		},
-		stop() {
-			active = false;
-		},
-		get isEmpty() {
-			return queue.length === 0;
-		},
-	};
-}
-
 export function subscribe(
 	conversationId: string,
 	cb: SSEEmitter,
@@ -350,27 +315,36 @@ export function subscribe(
 	const stream = activeStreams.get(conversationId);
 	if (!stream) return null;
 
+	let active = true;
 	let resolveDelivered: () => void;
 	const delivered = new Promise<void>((resolve) => {
 		resolveDelivered = resolve;
 	});
 
-	const eq = createEventQueue(cb, () => {
-		if (stream.status !== "streaming" && eq.isEmpty) resolveDelivered();
-	});
+	const forward: SSEEmitter = (event, data) => {
+		if (!active) return;
+		try {
+			cb(event, data);
+		} catch {
+			log.warn("Subscriber error");
+		}
+		if (stream.status !== "streaming") resolveDelivered();
+	};
 
 	for (const { event, data } of stream.events) {
-		eq.enqueue(event, data);
+		forward(event, data);
 	}
 
 	if (stream.status === "streaming") {
-		stream.subscribers.add(eq.enqueue);
+		stream.subscribers.add(forward);
+	} else {
+		resolveDelivered!();
 	}
 
 	return {
 		unsubscribe: () => {
-			eq.stop();
-			stream.subscribers.delete(eq.enqueue);
+			active = false;
+			stream.subscribers.delete(forward);
 			resolveDelivered();
 		},
 		delivered,

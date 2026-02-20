@@ -16,9 +16,15 @@ import { HistoryToolbar, type SourceFilter } from "./HistoryToolbar";
 import { LocalChangesPanel } from "./LocalChangesPanel";
 import { useCommitSelection } from "./useCommitSelection";
 
+const ALL_FILTERS = new Set<SourceFilter>([
+	"conversation",
+	"maintenance",
+	"manual",
+]);
+
 export function HistoryView() {
-	const [activeFilters, setActiveFilters] = useState<Set<SourceFilter>>(
-		() => new Set<SourceFilter>(["conversation", "maintenance", "manual"]),
+	const [activeFilters, setActiveFilters] = useState(
+		() => new Set(ALL_FILTERS),
 	);
 
 	const { data: commits = [] } = useQuery<CommitEntry[]>({
@@ -41,7 +47,7 @@ export function HistoryView() {
 	const hasLocalChanges = status?.hasLocalChanges ?? false;
 
 	const filteredCommits = useMemo(() => {
-		if (activeFilters.size === 3) return commits;
+		if (activeFilters.size === ALL_FILTERS.size) return commits;
 		return commits.filter((c) => activeFilters.has(c.source as SourceFilter));
 	}, [commits, activeFilters]);
 
@@ -69,10 +75,7 @@ export function HistoryView() {
 	}, []);
 
 	const selectedHash = viewMode?.type === "detail" ? viewMode.hash : null;
-	const isHeadSelected = selectedHash != null && selectedHash === headHash;
-	const showActions = !isHeadSelected || hasLocalChanges;
-
-	const isEmpty = commits.length === 0;
+	const showActions = selectedHash !== headHash || hasLocalChanges;
 
 	return (
 		<div className="flex min-h-0 flex-1 flex-col">
@@ -85,7 +88,7 @@ export function HistoryView() {
 				/>
 			</div>
 
-			{isEmpty ? (
+			{commits.length === 0 ? (
 				<div className="flex flex-1 flex-col items-center justify-center gap-3 text-muted-foreground">
 					<History className="h-12 w-12 opacity-30" />
 					<p className="text-sm">No version history yet</p>
@@ -107,29 +110,56 @@ export function HistoryView() {
 						}
 					/>
 
-					{viewMode?.type === "compare" ? (
-						<CompareView
-							fromHash={viewMode.fromHash}
-							toHash={viewMode.toHash}
-							onClose={exitCompare}
-						/>
-					) : viewMode?.type === "local-changes" ? (
-						<LocalChangesPanel />
-					) : selectedHash ? (
-						<CommitDetailPanel
-							hash={selectedHash}
-							onCompareWithCurrent={
-								showActions ? compareWithCurrent : undefined
-							}
-							showRestore={showActions}
-						/>
-					) : (
-						<div className="flex flex-1 items-center justify-center text-sm text-muted-foreground">
-							Select a commit to view details
-						</div>
-					)}
+					<DetailPanel
+						viewMode={viewMode}
+						selectedHash={selectedHash}
+						showActions={showActions}
+						compareWithCurrent={compareWithCurrent}
+						exitCompare={exitCompare}
+					/>
 				</div>
 			)}
+		</div>
+	);
+}
+
+function DetailPanel({
+	viewMode,
+	selectedHash,
+	showActions,
+	compareWithCurrent,
+	exitCompare,
+}: {
+	viewMode: ReturnType<typeof useCommitSelection>["viewMode"];
+	selectedHash: string | null;
+	showActions: boolean;
+	compareWithCurrent: () => void;
+	exitCompare: () => void;
+}) {
+	if (viewMode?.type === "compare") {
+		return (
+			<CompareView
+				fromHash={viewMode.fromHash}
+				toHash={viewMode.toHash}
+				onClose={exitCompare}
+			/>
+		);
+	}
+	if (viewMode?.type === "local-changes") {
+		return <LocalChangesPanel />;
+	}
+	if (selectedHash) {
+		return (
+			<CommitDetailPanel
+				hash={selectedHash}
+				onCompareWithCurrent={showActions ? compareWithCurrent : undefined}
+				showRestore={showActions}
+			/>
+		);
+	}
+	return (
+		<div className="flex flex-1 items-center justify-center text-sm text-muted-foreground">
+			Select a commit to view details
 		</div>
 	);
 }

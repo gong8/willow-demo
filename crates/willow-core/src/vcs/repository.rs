@@ -131,6 +131,43 @@ impl Repository {
             .unwrap_or_default()
     }
 
+    fn merge_context(
+        &self,
+        source_branch: &str,
+    ) -> Result<(String, CommitHash, CommitHash), WillowError> {
+        let current_branch_name = self
+            .current_branch()?
+            .ok_or(WillowError::VcsNotInitialized)?;
+        let source_hash = self
+            .store
+            .read_branch_ref(source_branch)?
+            .ok_or_else(|| WillowError::BranchNotFound(source_branch.to_string()))?;
+        let target_hash = self.head_hash()?;
+        Ok((current_branch_name, source_hash, target_hash))
+    }
+
+    fn commit_merge(
+        &self,
+        target_hash: CommitHash,
+        source_hash: CommitHash,
+        source_branch: &str,
+        current_branch_name: &str,
+        message: String,
+        graph: &Graph,
+    ) -> Result<CommitHash, WillowError> {
+        let hash = self.write_snapshot_commit(
+            vec![target_hash, source_hash],
+            message,
+            CommitSource::Merge {
+                source_branch: source_branch.to_string(),
+                target_branch: current_branch_name.to_string(),
+            },
+            graph,
+        )?;
+        self.store.write_branch_ref(current_branch_name, &hash)?;
+        Ok(hash)
+    }
+
     // ---- Commit operations ----
 
     /// Create a commit from pending changes. Returns the new commit hash.
@@ -240,14 +277,9 @@ impl Repository {
         let data = self.store.read_commit(hash)?;
 
         let current_graph = self.reconstruct_at(hash)?;
-        let parent_graph = if let Some(parent_hash) = data.parents.first() {
-            self.reconstruct_at(parent_hash)?
-        } else {
-            Graph {
-                root_id: current_graph.root_id.clone(),
-                nodes: std::collections::HashMap::new(),
-                links: std::collections::HashMap::new(),
-            }
+        let parent_graph = match data.parents.first() {
+            Some(parent_hash) => self.reconstruct_at(parent_hash)?,
+            None => Graph::empty(current_graph.root_id.clone()),
         };
 
         let diff = compute_graph_diff(&parent_graph, &current_graph);
@@ -277,13 +309,7 @@ impl Repository {
         let committed_graph = self.reconstruct_at(&head_hash)?;
         let diff = compute_graph_diff(&committed_graph, current_graph);
 
-        if diff.nodes_created.is_empty()
-            && diff.nodes_updated.is_empty()
-            && diff.nodes_deleted.is_empty()
-            && diff.links_created.is_empty()
-            && diff.links_removed.is_empty()
-            && diff.links_updated.is_empty()
-        {
+        if diff.is_empty() {
             return Ok(None);
         }
 
@@ -428,16 +454,8 @@ impl Repository {
         current_graph: &Graph,
     ) -> Result<MergeBranchResult, WillowError> {
         info!(source = %source_branch, "merging branch");
-        let current_branch_name = self
-            .current_branch()?
-            .ok_or(WillowError::VcsNotInitialized)?;
-
-        let source_hash = self
-            .store
-            .read_branch_ref(source_branch)?
-            .ok_or_else(|| WillowError::BranchNotFound(source_branch.to_string()))?;
-
-        let target_hash = self.head_hash()?;
+        let (current_branch_name, source_hash, target_hash) =
+            self.merge_context(source_branch)?;
 
         let read_parents = |h: &CommitHash| self.read_parents(h);
 
@@ -458,17 +476,14 @@ impl Repository {
 
         match three_way_merge(&base_graph, current_graph, &theirs_graph) {
             MergeResult::Success(merged_graph) => {
-                let hash = self.write_snapshot_commit(
-                    vec![target_hash, source_hash],
+                let hash = self.commit_merge(
+                    target_hash,
+                    source_hash,
+                    source_branch,
+                    &current_branch_name,
                     format!("Merge '{}' into '{}'", source_branch, current_branch_name),
-                    CommitSource::Merge {
-                        source_branch: source_branch.to_string(),
-                        target_branch: current_branch_name.clone(),
-                    },
                     &merged_graph,
                 )?;
-                self.store
-                    .write_branch_ref(&current_branch_name, &hash)?;
                 Ok(MergeBranchResult::Success(hash, merged_graph))
             }
             MergeResult::FastForward(hash) => {
@@ -489,34 +504,23 @@ impl Repository {
         source_branch: &str,
         current_graph: &Graph,
     ) -> Result<(CommitHash, Graph), WillowError> {
-        let current_branch_name = self
-            .current_branch()?
-            .ok_or(WillowError::VcsNotInitialized)?;
-
-        let source_hash = self
-            .store
-            .read_branch_ref(source_branch)?
-            .ok_or_else(|| WillowError::BranchNotFound(source_branch.to_string()))?;
-
-        let target_hash = self.head_hash()?;
+        let (current_branch_name, source_hash, target_hash) =
+            self.merge_context(source_branch)?;
 
         let mut resolved_graph = current_graph.clone();
         apply_resolutions(&mut resolved_graph, resolutions);
 
-        let hash = self.write_snapshot_commit(
-            vec![target_hash, source_hash],
+        let hash = self.commit_merge(
+            target_hash,
+            source_hash,
+            source_branch,
+            &current_branch_name,
             format!(
                 "Merge '{}' into '{}' (conflicts resolved)",
                 source_branch, current_branch_name
             ),
-            CommitSource::Merge {
-                source_branch: source_branch.to_string(),
-                target_branch: current_branch_name.clone(),
-            },
             &resolved_graph,
         )?;
-        self.store
-            .write_branch_ref(&current_branch_name, &hash)?;
 
         Ok((hash, resolved_graph))
     }
@@ -564,6 +568,62 @@ mod tests {
         }
     }
 
+    fn test_node(id: &str, content: &str) -> Node {
+        let now = Utc::now();
+        Node {
+            id: NodeId(id.to_string()),
+            node_type: NodeType::Detail,
+            content: content.to_string(),
+            parent_id: Some(NodeId("root".to_string())),
+            children: Vec::new(),
+            metadata: HashMap::new(),
+            previous_values: Vec::new(),
+            temporal: None,
+            created_at: now,
+            updated_at: now,
+        }
+    }
+
+    fn add_node_to_graph(graph: &mut Graph, id: &str, content: &str) -> Node {
+        let nid = NodeId(id.to_string());
+        let node = test_node(id, content);
+        graph.nodes.insert(nid.clone(), node.clone());
+        graph
+            .nodes
+            .get_mut(&NodeId("root".to_string()))
+            .unwrap()
+            .children
+            .push(nid);
+        node
+    }
+
+    fn commit_input(message: &str) -> CommitInput {
+        CommitInput {
+            message: message.to_string(),
+            source: CommitSource::Manual { tool_name: None },
+        }
+    }
+
+    fn commit_node(
+        repo: &Repository,
+        graph: &mut Graph,
+        id: &str,
+        content: &str,
+        message: &str,
+    ) -> CommitHash {
+        let node = add_node_to_graph(graph, id, content);
+        let nid = NodeId(id.to_string());
+        repo.create_commit(
+            &commit_input(message),
+            &[Change::CreateNode {
+                node_id: nid,
+                node,
+            }],
+            graph,
+        )
+        .unwrap()
+    }
+
     fn init_repo() -> (TempDir, Repository, Graph) {
         let dir = TempDir::new().unwrap();
         let graph = test_graph();
@@ -582,105 +642,30 @@ mod tests {
     #[test]
     fn test_init_twice_fails() {
         let (dir, _repo, graph) = init_repo();
-        let result = Repository::init(dir.path(), &graph);
-        assert!(result.is_err());
+        assert!(Repository::init(dir.path(), &graph).is_err());
     }
 
     #[test]
     fn test_commit_and_log() {
         let (_dir, repo, mut graph) = init_repo();
+        let hash = commit_node(&repo, &mut graph, "n1", "Test node", "Add test node");
 
-        // Add a node to the graph
-        let nid = NodeId("n1".to_string());
-        let now = Utc::now();
-        graph.nodes.insert(
-            nid.clone(),
-            Node {
-                id: nid.clone(),
-                node_type: NodeType::Detail,
-                content: "Test node".to_string(),
-                parent_id: Some(NodeId("root".to_string())),
-                children: Vec::new(),
-                metadata: HashMap::new(),
-                previous_values: Vec::new(),
-                temporal: None,
-                created_at: now,
-                updated_at: now,
-            },
-        );
-        graph
-            .nodes
-            .get_mut(&NodeId("root".to_string()))
-            .unwrap()
-            .children
-            .push(nid.clone());
-
-        let changes = vec![Change::CreateNode {
-            node_id: nid,
-            node: graph.nodes.get(&NodeId("n1".to_string())).unwrap().clone(),
-        }];
-
-        let input = CommitInput {
-            message: "Add test node".to_string(),
-            source: CommitSource::Manual { tool_name: None },
-        };
-
-        let hash = repo.create_commit(&input, &changes, &graph).unwrap();
-
-        // Log should have 2 commits (initial + new)
         let log = repo.log(None).unwrap();
         assert_eq!(log.len(), 2);
         assert_eq!(log[0].hash, hash);
         assert_eq!(log[0].data.message, "Add test node");
         assert_eq!(log[1].data.message, "Initial snapshot");
 
-        // Verify source attribution survives
-        match &log[0].data.source {
-            CommitSource::Manual { tool_name } => assert!(tool_name.is_none()),
-            _ => panic!("Expected Manual source"),
-        }
-        match &log[1].data.source {
-            CommitSource::Migration => {}
-            _ => panic!("Expected Migration source for initial commit"),
-        }
+        assert!(matches!(&log[0].data.source, CommitSource::Manual { tool_name } if tool_name.is_none()));
+        assert!(matches!(&log[1].data.source, CommitSource::Migration));
     }
 
     #[test]
     fn test_reconstruct() {
         let (_dir, repo, mut graph) = init_repo();
-
         let nid = NodeId("n1".to_string());
-        let now = Utc::now();
-        let node = Node {
-            id: nid.clone(),
-            node_type: NodeType::Detail,
-            content: "Reconstructed".to_string(),
-            parent_id: Some(NodeId("root".to_string())),
-            children: Vec::new(),
-            metadata: HashMap::new(),
-            previous_values: Vec::new(),
-            temporal: None,
-            created_at: now,
-            updated_at: now,
-        };
-        graph.nodes.insert(nid.clone(), node.clone());
-        graph
-            .nodes
-            .get_mut(&NodeId("root".to_string()))
-            .unwrap()
-            .children
-            .push(nid.clone());
+        let hash = commit_node(&repo, &mut graph, "n1", "Reconstructed", "Test");
 
-        let changes = vec![Change::CreateNode {
-            node_id: nid.clone(),
-            node,
-        }];
-        let input = CommitInput {
-            message: "Test".to_string(),
-            source: CommitSource::Manual { tool_name: None },
-        };
-
-        let hash = repo.create_commit(&input, &changes, &graph).unwrap();
         let reconstructed = repo.reconstruct_at(&hash).unwrap();
         assert!(reconstructed.nodes.contains_key(&nid));
         assert_eq!(reconstructed.nodes.get(&nid).unwrap().content, "Reconstructed");
@@ -689,33 +674,8 @@ mod tests {
     #[test]
     fn test_show_commit() {
         let (_dir, repo, mut graph) = init_repo();
+        let hash = commit_node(&repo, &mut graph, "n1", "New node", "Add node");
 
-        let nid = NodeId("n1".to_string());
-        let now = Utc::now();
-        let node = Node {
-            id: nid.clone(),
-            node_type: NodeType::Detail,
-            content: "New node".to_string(),
-            parent_id: Some(NodeId("root".to_string())),
-            children: Vec::new(),
-            metadata: HashMap::new(),
-            previous_values: Vec::new(),
-            temporal: None,
-            created_at: now,
-            updated_at: now,
-        };
-        graph.nodes.insert(nid.clone(), node.clone());
-
-        let changes = vec![Change::CreateNode {
-            node_id: nid.clone(),
-            node,
-        }];
-        let input = CommitInput {
-            message: "Add node".to_string(),
-            source: CommitSource::Manual { tool_name: None },
-        };
-
-        let hash = repo.create_commit(&input, &changes, &graph).unwrap();
         let (data, diff) = repo.show_commit(&hash).unwrap();
         assert_eq!(data.message, "Add node");
         assert_eq!(diff.nodes_created.len(), 1);
@@ -725,71 +685,27 @@ mod tests {
     fn test_branches() {
         let (_dir, repo, _graph) = init_repo();
 
-        // Create branch
         repo.create_branch("experiment").unwrap();
-        let branches = repo.list_branches().unwrap();
-        assert_eq!(branches.len(), 2);
+        assert_eq!(repo.list_branches().unwrap().len(), 2);
 
-        // Can't create duplicate
         assert!(repo.create_branch("experiment").is_err());
 
-        // Delete branch
         repo.delete_branch("experiment").unwrap();
-        let branches = repo.list_branches().unwrap();
-        assert_eq!(branches.len(), 1);
+        assert_eq!(repo.list_branches().unwrap().len(), 1);
 
-        // Can't delete current
         assert!(repo.delete_branch("main").is_err());
     }
 
     #[test]
     fn test_switch_branch() {
         let (_dir, repo, mut graph) = init_repo();
-
-        // Create experiment branch
         repo.create_branch("experiment").unwrap();
 
-        // Commit to main
-        let nid = NodeId("on-main".to_string());
-        let now = Utc::now();
-        let node = Node {
-            id: nid.clone(),
-            node_type: NodeType::Detail,
-            content: "Main branch node".to_string(),
-            parent_id: Some(NodeId("root".to_string())),
-            children: Vec::new(),
-            metadata: HashMap::new(),
-            previous_values: Vec::new(),
-            temporal: None,
-            created_at: now,
-            updated_at: now,
-        };
-        graph.nodes.insert(nid.clone(), node.clone());
-        graph
-            .nodes
-            .get_mut(&NodeId("root".to_string()))
-            .unwrap()
-            .children
-            .push(nid.clone());
+        commit_node(&repo, &mut graph, "on-main", "Main branch node", "Main commit");
 
-        repo.create_commit(
-            &CommitInput {
-                message: "Main commit".to_string(),
-                source: CommitSource::Manual { tool_name: None },
-            },
-            &[Change::CreateNode {
-                node_id: nid.clone(),
-                node,
-            }],
-            &graph,
-        )
-        .unwrap();
-
-        // Switch to experiment — should NOT have the main-only node
         let exp_graph = repo.switch_branch("experiment", false).unwrap();
         assert!(!exp_graph.nodes.contains_key(&NodeId("on-main".to_string())));
 
-        // Switch back to main — should have it
         let main_graph = repo.switch_branch("main", false).unwrap();
         assert!(main_graph.nodes.contains_key(&NodeId("on-main".to_string())));
     }
@@ -798,66 +714,24 @@ mod tests {
     fn test_switch_branch_with_pending_changes_fails() {
         let (_dir, repo, _graph) = init_repo();
         repo.create_branch("experiment").unwrap();
-        let result = repo.switch_branch("experiment", true);
-        assert!(result.is_err());
+        assert!(repo.switch_branch("experiment", true).is_err());
     }
 
     #[test]
     fn test_nothing_to_commit() {
         let (_dir, repo, graph) = init_repo();
-        let input = CommitInput {
-            message: "Empty".to_string(),
-            source: CommitSource::Manual { tool_name: None },
-        };
-        let result = repo.create_commit(&input, &[], &graph);
-        assert!(result.is_err());
+        assert!(repo.create_commit(&commit_input("Empty"), &[], &graph).is_err());
     }
 
     #[test]
     fn test_merge_fast_forward() {
         let (_dir, repo, _graph) = init_repo();
 
-        // Create and switch to feature branch
         repo.create_branch("feature").unwrap();
         let mut feature_graph = repo.switch_branch("feature", false).unwrap();
 
-        // Commit on feature
-        let nid = NodeId("feat-node".to_string());
-        let now = Utc::now();
-        let node = Node {
-            id: nid.clone(),
-            node_type: NodeType::Detail,
-            content: "Feature".to_string(),
-            parent_id: Some(NodeId("root".to_string())),
-            children: Vec::new(),
-            metadata: HashMap::new(),
-            previous_values: Vec::new(),
-            temporal: None,
-            created_at: now,
-            updated_at: now,
-        };
-        feature_graph.nodes.insert(nid.clone(), node.clone());
-        feature_graph
-            .nodes
-            .get_mut(&NodeId("root".to_string()))
-            .unwrap()
-            .children
-            .push(nid.clone());
+        commit_node(&repo, &mut feature_graph, "feat-node", "Feature", "Feature commit");
 
-        repo.create_commit(
-            &CommitInput {
-                message: "Feature commit".to_string(),
-                source: CommitSource::Manual { tool_name: None },
-            },
-            &[Change::CreateNode {
-                node_id: nid.clone(),
-                node,
-            }],
-            &feature_graph,
-        )
-        .unwrap();
-
-        // Switch back to main and merge feature (should fast-forward)
         let main_graph = repo.switch_branch("main", false).unwrap();
         let result = repo.merge_branch("feature", &main_graph).unwrap();
 
@@ -873,48 +747,15 @@ mod tests {
     fn test_checkout_and_restore() {
         let (_dir, repo, mut graph) = init_repo();
 
-        // Get initial commit hash
         let log = repo.log(None).unwrap();
         let initial_hash = log[0].hash.clone();
 
-        // Make some changes and commit
-        let nid = NodeId("n1".to_string());
-        let now = Utc::now();
-        let node = Node {
-            id: nid.clone(),
-            node_type: NodeType::Detail,
-            content: "Will be restored".to_string(),
-            parent_id: Some(NodeId("root".to_string())),
-            children: Vec::new(),
-            metadata: HashMap::new(),
-            previous_values: Vec::new(),
-            temporal: None,
-            created_at: now,
-            updated_at: now,
-        };
-        graph.nodes.insert(nid.clone(), node.clone());
+        commit_node(&repo, &mut graph, "n1", "Will be restored", "Add node");
 
-        repo.create_commit(
-            &CommitInput {
-                message: "Add node".to_string(),
-                source: CommitSource::Manual { tool_name: None },
-            },
-            &[Change::CreateNode {
-                node_id: nid.clone(),
-                node,
-            }],
-            &graph,
-        )
-        .unwrap();
-
-        // Restore to initial commit
         let (_restore_hash, restored_graph) =
             repo.restore_to_commit(&initial_hash, &graph).unwrap();
-        assert!(!restored_graph
-            .nodes
-            .contains_key(&NodeId("n1".to_string())));
+        assert!(!restored_graph.nodes.contains_key(&NodeId("n1".to_string())));
 
-        // Log should have 3 commits
         let log = repo.log(None).unwrap();
         assert_eq!(log.len(), 3);
         assert!(log[0].data.message.contains("Restore"));

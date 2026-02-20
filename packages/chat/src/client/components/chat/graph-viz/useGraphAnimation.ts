@@ -3,11 +3,12 @@ import type { AnimationPhase } from "./types.js";
 
 const PHASE_INTERVAL_MS = 150;
 
+const EMPTY_SET = new Set<string>();
+
 interface AnimationState {
 	activeNodeIds: Set<string>;
 	activeEdgeIds: Set<string>;
 	selectedNodeIds: Set<string>;
-	done: boolean;
 }
 
 export function useGraphAnimation(phases: AnimationPhase[]): AnimationState {
@@ -35,19 +36,16 @@ export function useGraphAnimation(phases: AnimationPhase[]): AnimationState {
 
 	if (phases.length === 0) {
 		return {
-			activeNodeIds: new Set(),
-			activeEdgeIds: new Set(),
-			selectedNodeIds: new Set(),
-			done: true,
+			activeNodeIds: EMPTY_SET,
+			activeEdgeIds: EMPTY_SET,
+			selectedNodeIds: EMPTY_SET,
 		};
 	}
 
-	const idx = Math.min(phaseIndex, phases.length - 1);
-	const current = phases[idx];
+	const current = phases[Math.min(phaseIndex, phases.length - 1)];
 	return {
 		activeNodeIds: new Set(current.activeNodeIds),
 		activeEdgeIds: new Set(current.activeEdgeIds),
 		selectedNodeIds: new Set(current.selectedNodeIds),
-		done: idx >= phases.length - 1,
 	};
 }

@@ -16,6 +16,13 @@ function relativeTime(timestamp: string): string {
 	return `${days}d ago`;
 }
 
+function getRowBg(isCompareSelected: boolean, isSelected: boolean) {
+	if (isCompareSelected)
+		return "bg-blue-500/10 ring-1 ring-inset ring-blue-500/30";
+	if (isSelected) return "bg-accent";
+	return "hover:bg-accent/50";
+}
+
 function CommitRow({
 	commit,
 	isSelected,
@@ -31,11 +38,8 @@ function CommitRow({
 	onSelect: (hash: string) => void;
 	onCompareSelect?: (hash: string) => void;
 }) {
-	const colorClass = (SOURCE_COLORS[commit.source] ?? DEFAULT_COLOR).bg;
-
 	return (
 		<button
-			key={commit.hash}
 			type="button"
 			onClick={(e) => {
 				if (e.shiftKey && onCompareSelect) {
@@ -44,19 +48,11 @@ function CommitRow({
 					onSelect(commit.hash);
 				}
 			}}
-			className={`flex w-full flex-col gap-1 border-b border-border px-4 py-3 text-left transition-colors ${
-				isCompareSelected
-					? "bg-blue-500/10 ring-1 ring-inset ring-blue-500/30"
-					: isSelected
-						? "bg-accent"
-						: "hover:bg-accent/50"
-			}`}
+			className={`flex w-full flex-col gap-1 border-b border-border px-4 py-3 text-left transition-colors ${getRowBg(isCompareSelected, isSelected)}`}
 		>
 			<div className="flex items-center gap-2">
 				<GitCommit
-					className={`h-3.5 w-3.5 shrink-0 ${
-						isHead ? "text-foreground" : "text-muted-foreground"
-					}`}
+					className={`h-3.5 w-3.5 shrink-0 ${isHead ? "text-foreground" : "text-muted-foreground"}`}
 				/>
 				<span className="font-mono text-xs text-muted-foreground">
 					{commit.hash.slice(0, 7)}
@@ -75,7 +71,7 @@ function CommitRow({
 			</p>
 			<div className="pl-5.5">
 				<span
-					className={`inline-block rounded px-1.5 py-0.5 text-[10px] font-medium ${colorClass}`}
+					className={`inline-block rounded px-1.5 py-0.5 text-[10px] font-medium ${(SOURCE_COLORS[commit.source] ?? DEFAULT_COLOR).bg}`}
 				>
 					{commit.source}
 				</span>

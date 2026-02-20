@@ -1,4 +1,3 @@
-import { AlertTriangle, Check, Loader2 } from "lucide-react";
 import { useMemo } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
@@ -6,9 +5,12 @@ import type { IndexerResultsPart } from "../../lib/chat-adapter.js";
 import { IndexerIndicator } from "./IndexerIndicator.js";
 import { ReasoningDisplay } from "./ReasoningDisplay.js";
 import { SearchIndicator } from "./SearchIndicator.js";
-import { getToolLabel } from "./ToolCallDisplay.js";
-
-// ─── Types ───
+import { ToolCallStatusIcon, getToolLabel } from "./ToolCallDisplay.js";
+import {
+	isCoordinatorSearchTool,
+	isIndexerToolCall,
+	isSearchToolCall,
+} from "./WillowToolCallDisplay.js";
 
 export interface ReconnectStream {
 	content: string;
@@ -26,20 +28,6 @@ export interface ReconnectStream {
 	done: boolean;
 }
 
-// ─── Helpers ───
-
-function isSearchToolCall(toolCallId: string): boolean {
-	return toolCallId.startsWith("search__");
-}
-
-function isCoordinatorSearchTool(toolName: string): boolean {
-	return toolName === "mcp__coordinator__search_memories";
-}
-
-function isIndexerToolCall(toolCallId: string): boolean {
-	return toolCallId.startsWith("indexer__");
-}
-
 interface ToolCallEntry {
 	toolCallId: string;
 	toolName: string;
@@ -47,8 +35,6 @@ interface ToolCallEntry {
 	result?: string;
 	isError?: boolean;
 }
-
-// ─── Reconnect Stream View ───
 
 export function ReconnectStreamView({ stream }: { stream: ReconnectStream }) {
 	const cleanContent = stream.content
@@ -132,13 +118,10 @@ export function ReconnectStreamView({ stream }: { stream: ReconnectStream }) {
 								className="my-1.5 rounded-lg border border-border bg-background text-sm"
 							>
 								<div className="flex items-center gap-2 px-3 py-2">
-									{tc.isError ? (
-										<AlertTriangle className="h-3.5 w-3.5 shrink-0 text-destructive" />
-									) : hasResult ? (
-										<Check className="h-3.5 w-3.5 shrink-0 text-green-600" />
-									) : (
-										<Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin text-muted-foreground" />
-									)}
+									<ToolCallStatusIcon
+										isError={tc.isError}
+										hasResult={hasResult}
+									/>
 									<span
 										className={`flex-1 truncate ${tc.isError ? "text-destructive" : "text-muted-foreground"}`}
 									>

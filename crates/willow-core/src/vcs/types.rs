@@ -127,18 +127,27 @@ pub struct CommitEntry {
     pub data: CommitData,
 }
 
+fn remove_child(graph: &mut Graph, parent_id: &NodeId, child_id: &NodeId) {
+    if let Some(parent) = graph.nodes.get_mut(parent_id) {
+        parent.children.retain(|c| c != child_id);
+    }
+}
+
+fn add_child(graph: &mut Graph, parent_id: &NodeId, child_id: &NodeId) {
+    if let Some(parent) = graph.nodes.get_mut(parent_id) {
+        if !parent.children.contains(child_id) {
+            parent.children.push(child_id.clone());
+        }
+    }
+}
+
 /// Apply a delta's changes to a Graph in-place (forward replay).
 pub fn apply_delta(graph: &mut Graph, delta: &Delta) {
     for change in &delta.changes {
         match change {
             Change::CreateNode { node_id, node } => {
-                // Add to parent's children
                 if let Some(ref parent_id) = node.parent_id {
-                    if let Some(parent) = graph.nodes.get_mut(parent_id) {
-                        if !parent.children.contains(node_id) {
-                            parent.children.push(node_id.clone());
-                        }
-                    }
+                    add_child(graph, parent_id, node_id);
                 }
                 graph.nodes.insert(node_id.clone(), node.clone());
             }
@@ -163,22 +172,14 @@ pub fn apply_delta(graph: &mut Graph, delta: &Delta) {
                 deleted_links,
                 ..
             } => {
-                // Remove from parent — clone parent_id to avoid borrow conflict
-                let parent_id = graph
-                    .nodes
-                    .get(node_id)
-                    .and_then(|n| n.parent_id.clone());
+                let parent_id = graph.nodes.get(node_id).and_then(|n| n.parent_id.clone());
                 if let Some(parent_id) = parent_id {
-                    if let Some(parent) = graph.nodes.get_mut(&parent_id) {
-                        parent.children.retain(|c| c != node_id);
-                    }
+                    remove_child(graph, &parent_id, node_id);
                 }
-                // Remove all deleted nodes
                 graph.nodes.remove(node_id);
                 for dn in deleted_nodes {
                     graph.nodes.remove(&dn.id);
                 }
-                // Remove all deleted links
                 for dl in deleted_links {
                     graph.links.remove(&dl.id);
                 }
@@ -199,21 +200,12 @@ pub fn apply_delta(graph: &mut Graph, delta: &Delta) {
                 old_parent,
                 new_parent,
             } => {
-                // Remove from old parent
                 if let Some(old_pid) = old_parent {
-                    if let Some(parent) = graph.nodes.get_mut(old_pid) {
-                        parent.children.retain(|c| c != node_id);
-                    }
+                    remove_child(graph, old_pid, node_id);
                 }
-                // Add to new parent
                 if let Some(new_pid) = new_parent {
-                    if let Some(parent) = graph.nodes.get_mut(new_pid) {
-                        if !parent.children.contains(node_id) {
-                            parent.children.push(node_id.clone());
-                        }
-                    }
+                    add_child(graph, new_pid, node_id);
                 }
-                // Update node's parent_id
                 if let Some(node) = graph.nodes.get_mut(node_id) {
                     node.parent_id = new_parent.clone();
                 }

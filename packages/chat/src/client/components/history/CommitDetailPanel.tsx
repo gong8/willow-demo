@@ -2,6 +2,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { GitCompare, Network, RotateCcw } from "lucide-react";
 import { useState } from "react";
 import {
+	type ChangeSummary,
 	type CommitDetail,
 	fetchCommitDetail,
 	restoreToCommit,
@@ -10,6 +11,16 @@ import { DiffSectionList } from "./DiffSections.js";
 import { SnapshotGraphPreview } from "./SnapshotGraphPreview.js";
 
 type TabId = "changes" | "preview";
+
+function hasDiffChanges(diff: ChangeSummary): boolean {
+	return (
+		diff.nodesCreated.length > 0 ||
+		diff.nodesUpdated.length > 0 ||
+		diff.nodesDeleted.length > 0 ||
+		diff.linksCreated.length > 0 ||
+		diff.linksRemoved.length > 0
+	);
+}
 
 const TABS: { id: TabId; label: string; icon: typeof GitCompare }[] = [
 	{ id: "changes", label: "Changes", icon: GitCompare },
@@ -103,15 +114,11 @@ export function CommitDetailPanel({
 			{activeTab === "changes" ? (
 				<div className="flex-1 overflow-y-auto p-6">
 					<DiffSectionList diff={diff} />
-					{diff.nodesCreated.length === 0 &&
-						diff.nodesUpdated.length === 0 &&
-						diff.nodesDeleted.length === 0 &&
-						diff.linksCreated.length === 0 &&
-						diff.linksRemoved.length === 0 && (
-							<p className="text-sm text-muted-foreground">
-								No changes in this commit.
-							</p>
-						)}
+					{!hasDiffChanges(diff) && (
+						<p className="text-sm text-muted-foreground">
+							No changes in this commit.
+						</p>
+					)}
 				</div>
 			) : (
 				<SnapshotGraphPreview hash={hash} />

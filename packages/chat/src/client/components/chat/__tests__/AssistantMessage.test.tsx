@@ -47,9 +47,4 @@ describe("AssistantMessage", () => {
 		render(<AssistantMessage />);
 		expect(screen.getByText("I can help with that.")).toBeDefined();
 	});
-
-	it("renders without crashing", () => {
-		const { container } = render(<AssistantMessage />);
-		expect(container).toBeDefined();
-	});
 });

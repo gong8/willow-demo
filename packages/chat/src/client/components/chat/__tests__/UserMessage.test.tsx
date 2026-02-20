@@ -28,9 +28,4 @@ describe("UserMessage", () => {
 		render(<UserMessage />);
 		expect(screen.getByText("Hello, AI!")).toBeDefined();
 	});
-
-	it("renders without crashing", () => {
-		const { container } = render(<UserMessage />);
-		expect(container).toBeDefined();
-	});
 });

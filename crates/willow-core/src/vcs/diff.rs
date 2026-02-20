@@ -55,6 +55,17 @@ pub struct ChangeSummary {
     pub links_updated: Vec<LinkChangeSummary>,
 }
 
+impl ChangeSummary {
+    pub fn is_empty(&self) -> bool {
+        self.nodes_created.is_empty()
+            && self.nodes_updated.is_empty()
+            && self.nodes_deleted.is_empty()
+            && self.links_created.is_empty()
+            && self.links_removed.is_empty()
+            && self.links_updated.is_empty()
+    }
+}
+
 /// Build the path from root to a node (list of content strings).
 fn build_node_path(graph: &Graph, node_id: &NodeId) -> Vec<String> {
     let mut path = Vec::new();
@@ -71,65 +82,55 @@ fn build_node_path(graph: &Graph, node_id: &NodeId) -> Vec<String> {
     path
 }
 
+/// Collect items from `source` whose keys are absent in `other`.
+fn diff_keys_only_in<K, V, T>(
+    source: &std::collections::HashMap<K, V>,
+    other: &std::collections::HashMap<K, V>,
+    map_fn: impl Fn(&K, &V) -> T,
+) -> Vec<T>
+where
+    K: Eq + std::hash::Hash,
+{
+    source.iter()
+        .filter(|(k, _)| !other.contains_key(k))
+        .map(|(k, v)| map_fn(k, v))
+        .collect()
+}
+
 /// Compute a diff between two graph states.
 pub fn compute_graph_diff(old: &Graph, new: &Graph) -> ChangeSummary {
-    let mut summary = ChangeSummary::default();
+    let nodes_created = diff_keys_only_in(&new.nodes, &old.nodes, |nid, node| {
+        NodeChangeSummary::new(node, None, build_node_path(new, nid))
+    });
+    let nodes_deleted = diff_keys_only_in(&old.nodes, &new.nodes, |nid, node| {
+        NodeChangeSummary::new(node, None, build_node_path(old, nid))
+    });
+    let nodes_updated: Vec<_> = new.nodes.iter()
+        .filter_map(|(nid, new_node)| {
+            let old_node = old.nodes.get(nid)?;
+            (old_node.content != new_node.content || old_node.metadata != new_node.metadata)
+                .then(|| NodeChangeSummary::new(new_node, Some(old_node.content.clone()), build_node_path(new, nid)))
+        })
+        .collect();
 
-    // Nodes created (in new but not old)
-    for (nid, node) in &new.nodes {
-        if !old.nodes.contains_key(nid) {
-            summary.nodes_created.push(NodeChangeSummary::new(node, None, build_node_path(new, nid)));
-        }
-    }
-
-    // Nodes deleted (in old but not new)
-    for (nid, node) in &old.nodes {
-        if !new.nodes.contains_key(nid) {
-            summary.nodes_deleted.push(NodeChangeSummary::new(node, None, build_node_path(old, nid)));
-        }
-    }
-
-    // Nodes updated (in both, but content or metadata changed)
-    for (nid, new_node) in &new.nodes {
-        if let Some(old_node) = old.nodes.get(nid) {
-            if old_node.content != new_node.content || old_node.metadata != new_node.metadata {
-                summary.nodes_updated.push(NodeChangeSummary::new(
-                    new_node,
-                    Some(old_node.content.clone()),
-                    build_node_path(new, nid),
-                ));
-            }
-        }
-    }
-
-    // Links created
-    for (lid, link) in &new.links {
-        if !old.links.contains_key(lid) {
-            summary.links_created.push(LinkChangeSummary::from_link(lid, link));
-        }
-    }
-
-    // Links removed
-    for (lid, link) in &old.links {
-        if !new.links.contains_key(lid) {
-            summary.links_removed.push(LinkChangeSummary::from_link(lid, link));
-        }
-    }
-
-    // Links updated (present in both, but relation/bidirectional/confidence changed)
-    for (lid, new_link) in &new.links {
-        if let Some(old_link) = old.links.get(lid) {
-            if old_link.relation != new_link.relation
+    let links_created = diff_keys_only_in(&new.links, &old.links, |lid, link| {
+        LinkChangeSummary::from_link(lid, link)
+    });
+    let links_removed = diff_keys_only_in(&old.links, &new.links, |lid, link| {
+        LinkChangeSummary::from_link(lid, link)
+    });
+    let links_updated: Vec<_> = new.links.iter()
+        .filter_map(|(lid, new_link)| {
+            let old_link = old.links.get(lid)?;
+            (old_link.relation != new_link.relation
                 || old_link.bidirectional != new_link.bidirectional
-                || old_link.confidence != new_link.confidence
-            {
-                summary.links_updated.push(LinkChangeSummary::from_link(lid, new_link));
-            }
-        }
-    }
+                || old_link.confidence != new_link.confidence)
+                .then(|| LinkChangeSummary::from_link(lid, new_link))
+        })
+        .collect();
 
-    debug!(created = summary.nodes_created.len(), updated = summary.nodes_updated.len(), deleted = summary.nodes_deleted.len(), "graph diff computed");
-    summary
+    debug!(created = nodes_created.len(), updated = nodes_updated.len(), deleted = nodes_deleted.len(), "graph diff computed");
+    ChangeSummary { nodes_created, nodes_updated, nodes_deleted, links_created, links_removed, links_updated }
 }
 
 #[cfg(test)]
