@@ -63,6 +63,36 @@ impl GraphStore {
         }
     }
 
+    fn require_repo(&self) -> Result<&Repository, WillowError> {
+        self.repo.as_ref().ok_or(WillowError::VcsNotInitialized)
+    }
+
+    fn apply_graph(&mut self, graph: Graph) -> Result<(), WillowError> {
+        self.graph = graph;
+        self.save()?;
+        self.pending_changes.clear();
+        Ok(())
+    }
+
+    fn get_node(&self, node_id: &str) -> Result<&Node, WillowError> {
+        let nid = NodeId(node_id.to_string());
+        self.graph
+            .nodes
+            .get(&nid)
+            .ok_or_else(|| WillowError::NodeNotFound(node_id.to_string()))
+    }
+
+    fn links_touching(&self, node_ids: &std::collections::HashSet<&NodeId>) -> Vec<Link> {
+        self.graph
+            .links
+            .values()
+            .filter(|link| {
+                node_ids.contains(&link.from_node) || node_ids.contains(&link.to_node)
+            })
+            .cloned()
+            .collect()
+    }
+
     // ---- VCS methods ----
 
     pub fn vcs_init(&mut self) -> Result<(), WillowError> {
@@ -88,7 +118,7 @@ impl GraphStore {
     }
 
     pub fn commit(&mut self, input: CommitInput) -> Result<crate::vcs::types::CommitHash, WillowError> {
-        let repo = self.repo.as_ref().ok_or(WillowError::VcsNotInitialized)?;
+        let repo = self.require_repo()?;
         let hash = repo.create_commit(&input, &self.pending_changes, &self.graph)?;
         self.pending_changes.clear();
         Ok(hash)
@@ -97,64 +127,48 @@ impl GraphStore {
     /// Commit if the graph on disk differs from the last committed state.
     /// Used after external processes modify the graph file.
     pub fn commit_external_changes(&self, input: CommitInput) -> Result<Option<crate::vcs::types::CommitHash>, WillowError> {
-        let repo = self.repo.as_ref().ok_or(WillowError::VcsNotInitialized)?;
-        repo.commit_if_changed(&input, &self.graph)
+        self.require_repo()?.commit_if_changed(&input, &self.graph)
     }
 
     pub fn discard_changes(&mut self) -> Result<(), WillowError> {
-        let repo = self.repo.as_ref().ok_or(WillowError::VcsNotInitialized)?;
-        // Reconstruct from last commit
+        let repo = self.require_repo()?;
         if let Some(head) = repo.log(Some(1))?.first() {
             let graph = repo.reconstruct_at(&head.hash)?;
-            self.graph = graph;
-            self.save()?;
+            self.apply_graph(graph)?;
+        } else {
+            self.pending_changes.clear();
         }
-        self.pending_changes.clear();
         Ok(())
     }
 
     pub fn get_repo(&self) -> Result<&Repository, WillowError> {
-        self.repo.as_ref().ok_or(WillowError::VcsNotInitialized)
+        self.require_repo()
     }
 
     /// Switch branch — replaces the in-memory graph and saves to disk.
     pub fn switch_branch(&mut self, name: &str) -> Result<(), WillowError> {
-        let repo = self.repo.as_ref().ok_or(WillowError::VcsNotInitialized)?;
-        let graph = repo.switch_branch(name, self.has_pending_changes())?;
-        self.graph = graph;
-        self.save()?;
-        self.pending_changes.clear();
-        Ok(())
+        let graph = self.require_repo()?.switch_branch(name, self.has_pending_changes())?;
+        self.apply_graph(graph)
     }
 
     /// Checkout a specific commit (detached HEAD).
     pub fn checkout_commit(&mut self, hash: &crate::vcs::types::CommitHash) -> Result<(), WillowError> {
-        let repo = self.repo.as_ref().ok_or(WillowError::VcsNotInitialized)?;
-        let graph = repo.checkout_commit(hash, self.has_pending_changes())?;
-        self.graph = graph;
-        self.save()?;
-        self.pending_changes.clear();
-        Ok(())
+        let graph = self.require_repo()?.checkout_commit(hash, self.has_pending_changes())?;
+        self.apply_graph(graph)
     }
 
     /// Restore to a past commit (creates a new commit).
     pub fn restore_to_commit(&mut self, hash: &crate::vcs::types::CommitHash) -> Result<crate::vcs::types::CommitHash, WillowError> {
-        let repo = self.repo.as_ref().ok_or(WillowError::VcsNotInitialized)?;
-        let (new_hash, graph) = repo.restore_to_commit(hash, &self.graph)?;
-        self.graph = graph;
-        self.save()?;
-        self.pending_changes.clear();
+        let (new_hash, graph) = self.require_repo()?.restore_to_commit(hash, &self.graph)?;
+        self.apply_graph(graph)?;
         Ok(new_hash)
     }
 
     /// Merge a source branch into current. Returns Ok(hash) on success.
     pub fn merge_branch(&mut self, source: &str) -> Result<crate::vcs::types::CommitHash, WillowError> {
-        let repo = self.repo.as_ref().ok_or(WillowError::VcsNotInitialized)?;
-        match repo.merge_branch(source, &self.graph)? {
+        match self.require_repo()?.merge_branch(source, &self.graph)? {
             crate::vcs::repository::MergeBranchResult::Success(hash, graph) => {
-                self.graph = graph;
-                self.save()?;
-                self.pending_changes.clear();
+                self.apply_graph(graph)?;
                 Ok(hash)
             }
             crate::vcs::repository::MergeBranchResult::Conflicts { conflicts, .. } => {
@@ -223,17 +237,37 @@ impl GraphStore {
         node_id: &str,
         depth: Option<u32>,
     ) -> Result<ContextResult, WillowError> {
-        let nid = NodeId(node_id.to_string());
-        let node = self
-            .graph
-            .nodes
-            .get(&nid)
-            .ok_or_else(|| WillowError::NodeNotFound(node_id.to_string()))?
-            .clone();
+        let node = self.get_node(node_id)?.clone();
+        let nid = &node.id;
 
-        // Collect ancestors
+        let ancestors = self.collect_ancestors(nid);
+
+        let max_depth = depth.unwrap_or(2);
+        let mut descendants = Vec::new();
+        self.collect_descendants(nid, max_depth, 0, &mut descendants);
+
+        let mut involved_ids: std::collections::HashSet<&NodeId> = std::collections::HashSet::new();
+        involved_ids.insert(nid);
+        for a in &ancestors {
+            involved_ids.insert(&a.id);
+        }
+        for d in &descendants {
+            involved_ids.insert(&d.id);
+        }
+
+        let links = self.links_touching(&involved_ids);
+
+        Ok(ContextResult {
+            node,
+            ancestors,
+            descendants,
+            links,
+        })
+    }
+
+    fn collect_ancestors(&self, node_id: &NodeId) -> Vec<Node> {
         let mut ancestors = Vec::new();
-        let mut current_id = node.parent_id.clone();
+        let mut current_id = self.graph.nodes.get(node_id).and_then(|n| n.parent_id.clone());
         while let Some(pid) = current_id {
             if let Some(parent) = self.graph.nodes.get(&pid) {
                 ancestors.push(parent.clone());
@@ -242,39 +276,7 @@ impl GraphStore {
                 break;
             }
         }
-
-        // Collect descendants up to depth
-        let max_depth = depth.unwrap_or(2);
-        let mut descendants = Vec::new();
-        self.collect_descendants(&nid, max_depth, 0, &mut descendants);
-
-        // Collect all node IDs involved
-        let mut involved_ids: std::collections::HashSet<&NodeId> = std::collections::HashSet::new();
-        involved_ids.insert(&nid);
-        for a in &ancestors {
-            involved_ids.insert(&a.id);
-        }
-        for d in &descendants {
-            involved_ids.insert(&d.id);
-        }
-
-        // Find all links touching any involved node
-        let links: Vec<Link> = self
-            .graph
-            .links
-            .values()
-            .filter(|link| {
-                involved_ids.contains(&link.from_node) || involved_ids.contains(&link.to_node)
-            })
-            .cloned()
-            .collect();
-
-        Ok(ContextResult {
-            node,
-            ancestors,
-            descendants,
-            links,
-        })
+        ancestors
     }
 
     fn collect_descendants(
@@ -309,13 +311,8 @@ impl GraphStore {
         debug!(node_id = %node_id, "update_node");
         let nid = NodeId(node_id.to_string());
 
-        // Capture old values before mutation for change tracking
         let (old_content, old_metadata) = {
-            let node = self
-                .graph
-                .nodes
-                .get(&nid)
-                .ok_or_else(|| WillowError::NodeNotFound(node_id.to_string()))?;
+            let node = self.get_node(node_id)?;
             (node.content.clone(), node.metadata.clone())
         };
 
@@ -323,7 +320,7 @@ impl GraphStore {
             .graph
             .nodes
             .get_mut(&nid)
-            .ok_or_else(|| WillowError::NodeNotFound(node_id.to_string()))?;
+            .unwrap();
 
         let mut content_changed = false;
         let mut metadata_changed = false;
@@ -377,45 +374,30 @@ impl GraphStore {
             return Err(WillowError::CannotDeleteRoot);
         }
 
-        if !self.graph.nodes.contains_key(&nid) {
-            return Err(WillowError::NodeNotFound(node_id.to_string()));
-        }
+        self.get_node(node_id)?;
 
-        // Collect all descendants recursively
         let mut to_delete = Vec::new();
-        self.collect_all_descendants(&nid, &mut to_delete);
+        self.collect_descendant_ids(&nid, &mut to_delete);
         to_delete.push(nid.clone());
         debug!(node_id = %node_id, cascade = to_delete.len(), "delete_node");
 
-        // Capture deleted nodes and links for change tracking
         let deleted_nodes: Vec<Node> = to_delete
             .iter()
             .filter_map(|id| self.graph.nodes.get(id).cloned())
             .collect();
         let delete_set: std::collections::HashSet<&NodeId> = to_delete.iter().collect();
-        let deleted_links: Vec<Link> = self
-            .graph
-            .links
-            .values()
-            .filter(|link| {
-                delete_set.contains(&link.from_node) || delete_set.contains(&link.to_node)
-            })
-            .cloned()
-            .collect();
+        let deleted_links = self.links_touching(&delete_set);
 
-        // Remove from parent's children
         if let Some(parent_id) = self.graph.nodes.get(&nid).and_then(|n| n.parent_id.clone()) {
             if let Some(parent) = self.graph.nodes.get_mut(&parent_id) {
                 parent.children.retain(|c| c != &nid);
             }
         }
 
-        // Remove all nodes
         for id in &to_delete {
             self.graph.nodes.remove(id);
         }
 
-        // Remove links referencing any deleted node
         self.graph
             .links
             .retain(|_, link| !delete_set.contains(&link.from_node) && !delete_set.contains(&link.to_node));
@@ -431,11 +413,11 @@ impl GraphStore {
         Ok(())
     }
 
-    fn collect_all_descendants(&self, node_id: &NodeId, result: &mut Vec<NodeId>) {
+    fn collect_descendant_ids(&self, node_id: &NodeId, result: &mut Vec<NodeId>) {
         if let Some(node) = self.graph.nodes.get(node_id) {
             for child_id in &node.children {
                 result.push(child_id.clone());
-                self.collect_all_descendants(child_id, result);
+                self.collect_descendant_ids(child_id, result);
             }
         }
     }
@@ -452,21 +434,12 @@ impl GraphStore {
         let from_nid = NodeId(from_node.to_string());
         let to_nid = NodeId(to_node.to_string());
 
-        if !self.graph.nodes.contains_key(&from_nid) {
-            return Err(WillowError::NodeNotFound(from_node.to_string()));
-        }
-        if !self.graph.nodes.contains_key(&to_nid) {
-            return Err(WillowError::NodeNotFound(to_node.to_string()));
-        }
+        self.get_node(from_node)?;
+        self.get_node(to_node)?;
 
-        // Parse confidence
-        let confidence_level = match confidence {
-            Some(s) => Some(
-                ConfidenceLevel::from_str(s)
-                    .ok_or_else(|| WillowError::InvalidConfidence(s.to_string()))?,
-            ),
-            None => None,
-        };
+        let confidence_level = confidence
+            .map(|s| ConfidenceLevel::from_str(s).ok_or_else(|| WillowError::InvalidConfidence(s.to_string())))
+            .transpose()?;
 
         // Check for duplicate — also check reverse direction when bidirectional
         let is_dup = self.graph.links.values().any(|link| {
@@ -523,11 +496,11 @@ impl GraphStore {
             .ok_or_else(|| WillowError::LinkNotFound(link_id.to_string()))?
             .clone();
 
-        let link = self
-            .graph
-            .links
-            .get_mut(&lid)
-            .unwrap();
+        let confidence_level = confidence
+            .map(|s| ConfidenceLevel::from_str(s).ok_or_else(|| WillowError::InvalidConfidence(s.to_string())))
+            .transpose()?;
+
+        let link = self.graph.links.get_mut(&lid).unwrap();
 
         if let Some(r) = relation {
             link.relation = r.to_string();
@@ -535,11 +508,8 @@ impl GraphStore {
         if let Some(b) = bidirectional {
             link.bidirectional = b;
         }
-        if let Some(c) = confidence {
-            link.confidence = Some(
-                ConfidenceLevel::from_str(c)
-                    .ok_or_else(|| WillowError::InvalidConfidence(c.to_string()))?,
-            );
+        if let Some(c) = confidence_level {
+            link.confidence = Some(c);
         }
 
         let new_link = link.clone();

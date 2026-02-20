@@ -4,7 +4,10 @@ export type {
 	CreateNodeInput,
 	UpdateNodeInput,
 	AddLinkInput,
+	UpdateLinkInput,
+	DeleteLinkInput,
 	SearchNodesInput,
 	GetContextInput,
 	DeleteNodeInput,
+	WalkGraphInput,
 } from "./schemas.js";

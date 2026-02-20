@@ -1,4 +1,4 @@
-use crate::model::{Graph, Link, LinkId, Node, NodeId};
+use crate::model::{Graph, Link, Node, NodeId};
 use crate::vcs::types::CommitHash;
 use std::collections::{HashSet, VecDeque};
 
@@ -49,6 +49,57 @@ pub enum MergeResult {
     Conflicts(Vec<MergeConflict>),
 }
 
+fn node_modified(node: &Node, base: &Node) -> bool {
+    node.content != base.content || node.metadata != base.metadata
+}
+
+fn remove_child(graph: &mut Graph, parent_id: &NodeId, child_id: &NodeId) {
+    if let Some(parent) = graph.nodes.get_mut(parent_id) {
+        parent.children.retain(|c| c != child_id);
+    }
+}
+
+fn add_child(graph: &mut Graph, parent_id: &NodeId, child_id: &NodeId) {
+    if let Some(parent) = graph.nodes.get_mut(parent_id) {
+        if !parent.children.contains(child_id) {
+            parent.children.push(child_id.clone());
+        }
+    }
+}
+
+fn remove_node(graph: &mut Graph, node_id: &NodeId) {
+    let parent_id = graph.nodes.get(node_id).and_then(|n| n.parent_id.clone());
+    if let Some(ref pid) = parent_id {
+        remove_child(graph, pid, node_id);
+    }
+    graph.nodes.remove(node_id);
+}
+
+fn parent_id_or_empty(node: &Node) -> NodeId {
+    node.parent_id
+        .clone()
+        .unwrap_or(NodeId("".to_string()))
+}
+
+fn bfs_expand(
+    queue: &mut VecDeque<CommitHash>,
+    visited: &mut HashSet<String>,
+    other_visited: &HashSet<String>,
+    read_parents: &dyn Fn(&CommitHash) -> Vec<CommitHash>,
+) -> Option<CommitHash> {
+    if let Some(hash) = queue.pop_front() {
+        if other_visited.contains(&hash.0) {
+            return Some(hash);
+        }
+        for parent in read_parents(&hash) {
+            if visited.insert(parent.0.clone()) {
+                queue.push_back(parent);
+            }
+        }
+    }
+    None
+}
+
 /// Find the merge base (common ancestor) of two commits via BFS.
 /// Returns None if no common ancestor exists (shouldn't happen with shared initial commit).
 pub fn find_merge_base(
@@ -56,52 +107,29 @@ pub fn find_merge_base(
     theirs: &CommitHash,
     read_parents: &dyn Fn(&CommitHash) -> Vec<CommitHash>,
 ) -> Option<CommitHash> {
-    // BFS from both sides, find first intersection
-    let mut ours_visited: HashSet<String> = HashSet::new();
-    let mut theirs_visited: HashSet<String> = HashSet::new();
-    let mut ours_queue: VecDeque<CommitHash> = VecDeque::new();
-    let mut theirs_queue: VecDeque<CommitHash> = VecDeque::new();
-
-    ours_queue.push_back(ours.clone());
-    theirs_queue.push_back(theirs.clone());
-    ours_visited.insert(ours.0.clone());
-    theirs_visited.insert(theirs.0.clone());
-
-    // Check if they're the same commit
     if ours.0 == theirs.0 {
         return Some(ours.clone());
     }
 
-    loop {
-        let ours_done = ours_queue.is_empty();
-        let theirs_done = theirs_queue.is_empty();
+    let mut ours_visited: HashSet<String> = HashSet::from([ours.0.clone()]);
+    let mut theirs_visited: HashSet<String> = HashSet::from([theirs.0.clone()]);
+    let mut ours_queue: VecDeque<CommitHash> = VecDeque::from([ours.clone()]);
+    let mut theirs_queue: VecDeque<CommitHash> = VecDeque::from([theirs.clone()]);
 
-        if ours_done && theirs_done {
+    loop {
+        if ours_queue.is_empty() && theirs_queue.is_empty() {
             return None;
         }
 
-        // Expand ours
-        if let Some(hash) = ours_queue.pop_front() {
-            if theirs_visited.contains(&hash.0) {
-                return Some(hash);
-            }
-            for parent in read_parents(&hash) {
-                if ours_visited.insert(parent.0.clone()) {
-                    ours_queue.push_back(parent);
-                }
-            }
+        if let Some(found) =
+            bfs_expand(&mut ours_queue, &mut ours_visited, &theirs_visited, read_parents)
+        {
+            return Some(found);
         }
-
-        // Expand theirs
-        if let Some(hash) = theirs_queue.pop_front() {
-            if ours_visited.contains(&hash.0) {
-                return Some(hash);
-            }
-            for parent in read_parents(&hash) {
-                if theirs_visited.insert(parent.0.clone()) {
-                    theirs_queue.push_back(parent);
-                }
-            }
+        if let Some(found) =
+            bfs_expand(&mut theirs_queue, &mut theirs_visited, &ours_visited, read_parents)
+        {
+            return Some(found);
         }
     }
 }
@@ -133,197 +161,129 @@ pub fn is_ancestor(
     false
 }
 
+fn merge_deleted_nodes(
+    base: &Graph,
+    deleter: &Graph,
+    survivor: &Graph,
+    deleted_by: MergeSide,
+    merged: &mut Graph,
+    conflicts: &mut Vec<MergeConflict>,
+) {
+    for (nid, base_node) in &base.nodes {
+        if deleter.nodes.contains_key(nid) || !survivor.nodes.contains_key(nid) {
+            continue;
+        }
+        let survivor_node = survivor.nodes.get(nid).unwrap();
+        if node_modified(survivor_node, base_node) {
+            conflicts.push(MergeConflict {
+                node_id: nid.clone(),
+                conflict_type: ConflictType::DeleteModifyConflict {
+                    deleted_by: deleted_by.clone(),
+                    modified_node: survivor_node.clone(),
+                },
+            });
+        } else if matches!(deleted_by, MergeSide::Theirs) {
+            remove_node(merged, nid);
+        }
+    }
+}
+
+fn reparent_node(merged: &mut Graph, nid: &NodeId, new_parent_id: &Option<NodeId>) {
+    let old_parent_id = merged.nodes.get(nid).and_then(|n| n.parent_id.clone());
+    if let Some(ref old_pid) = old_parent_id {
+        remove_child(merged, old_pid, nid);
+    }
+    if let Some(node) = merged.nodes.get_mut(nid) {
+        node.parent_id = new_parent_id.clone();
+    }
+    if let Some(ref new_pid) = new_parent_id {
+        add_child(merged, new_pid, nid);
+    }
+}
+
 /// Perform a three-way merge of two graphs given a common base.
 pub fn three_way_merge(base: &Graph, ours: &Graph, theirs: &Graph) -> MergeResult {
     let mut merged = ours.clone();
     let mut conflicts = Vec::new();
 
-    // Collect IDs
-    let base_node_ids: HashSet<&NodeId> = base.nodes.keys().collect();
-    let ours_node_ids: HashSet<&NodeId> = ours.nodes.keys().collect();
-    let theirs_node_ids: HashSet<&NodeId> = theirs.nodes.keys().collect();
-
-    // 1. Nodes added only by theirs → add to merged
-    for nid in &theirs_node_ids {
-        if !base_node_ids.contains(nid) && !ours_node_ids.contains(nid) {
-            let node = theirs.nodes.get(*nid).unwrap().clone();
-            // Also add to parent's children
+    // 1. Nodes added only by theirs
+    for (nid, node) in &theirs.nodes {
+        if !base.nodes.contains_key(nid) && !ours.nodes.contains_key(nid) {
             if let Some(ref parent_id) = node.parent_id {
-                if let Some(parent) = merged.nodes.get_mut(parent_id) {
-                    if !parent.children.contains(nid) {
-                        parent.children.push((*nid).clone());
-                    }
-                }
+                add_child(&mut merged, parent_id, nid);
             }
-            merged.nodes.insert((*nid).clone(), node);
+            merged.nodes.insert(nid.clone(), node.clone());
         }
     }
 
-    // 2. Nodes deleted by theirs (in base but not in theirs)
-    for nid in &base_node_ids {
-        if !theirs_node_ids.contains(nid) {
-            if ours_node_ids.contains(nid) {
-                let ours_node = ours.nodes.get(*nid).unwrap();
-                let base_node = base.nodes.get(*nid).unwrap();
-                // If ours also modified it → conflict
-                if ours_node.content != base_node.content
-                    || ours_node.metadata != base_node.metadata
-                {
-                    conflicts.push(MergeConflict {
-                        node_id: (*nid).clone(),
-                        conflict_type: ConflictType::DeleteModifyConflict {
-                            deleted_by: MergeSide::Theirs,
-                            modified_node: ours_node.clone(),
-                        },
-                    });
-                } else {
-                    // Ours didn't modify, accept theirs' deletion
-                    let parent_id = merged
-                        .nodes
-                        .get(*nid)
-                        .and_then(|n| n.parent_id.clone());
-                    if let Some(parent_id) = parent_id {
-                        if let Some(parent) = merged.nodes.get_mut(&parent_id) {
-                            parent.children.retain(|c| c != *nid);
-                        }
-                    }
-                    merged.nodes.remove(*nid);
-                }
-            }
-        }
-    }
+    // 2. Nodes deleted by one side, possibly modified by the other
+    merge_deleted_nodes(base, theirs, ours, MergeSide::Theirs, &mut merged, &mut conflicts);
+    merge_deleted_nodes(base, ours, theirs, MergeSide::Ours, &mut merged, &mut conflicts);
 
-    // 3. Nodes deleted by ours (in base but not in ours)
-    for nid in &base_node_ids {
-        if !ours_node_ids.contains(nid) && theirs_node_ids.contains(nid) {
-            let theirs_node = theirs.nodes.get(*nid).unwrap();
-            let base_node = base.nodes.get(*nid).unwrap();
-            if theirs_node.content != base_node.content
-                || theirs_node.metadata != base_node.metadata
-            {
-                conflicts.push(MergeConflict {
-                    node_id: (*nid).clone(),
-                    conflict_type: ConflictType::DeleteModifyConflict {
-                        deleted_by: MergeSide::Ours,
-                        modified_node: theirs_node.clone(),
-                    },
-                });
-            }
-            // If theirs didn't modify, ours' deletion stands (already not in merged)
-        }
-    }
-
-    // 4. Nodes modified by both (in all three)
-    for nid in &base_node_ids {
-        if !ours_node_ids.contains(nid) || !theirs_node_ids.contains(nid) {
+    // 3. Nodes present in all three — check content and structural changes
+    for (nid, base_node) in &base.nodes {
+        let (Some(ours_node), Some(theirs_node)) =
+            (ours.nodes.get(nid), theirs.nodes.get(nid))
+        else {
             continue;
-        }
-        let base_node = base.nodes.get(*nid).unwrap();
-        let ours_node = ours.nodes.get(*nid).unwrap();
-        let theirs_node = theirs.nodes.get(*nid).unwrap();
+        };
 
-        let ours_changed =
-            ours_node.content != base_node.content || ours_node.metadata != base_node.metadata;
-        let theirs_changed =
-            theirs_node.content != base_node.content || theirs_node.metadata != base_node.metadata;
+        let ours_changed = node_modified(ours_node, base_node);
+        let theirs_changed = node_modified(theirs_node, base_node);
 
-        if ours_changed && theirs_changed {
-            // Both changed — check if identical
-            if ours_node.content == theirs_node.content
-                && ours_node.metadata == theirs_node.metadata
-            {
-                // Identical changes, no conflict
-            } else {
-                conflicts.push(MergeConflict {
-                    node_id: (*nid).clone(),
-                    conflict_type: ConflictType::ContentConflict {
-                        base: base_node.content.clone(),
-                        ours: ours_node.content.clone(),
-                        theirs: theirs_node.content.clone(),
-                    },
-                });
-            }
+        if ours_changed && theirs_changed
+            && (ours_node.content != theirs_node.content
+                || ours_node.metadata != theirs_node.metadata)
+        {
+            conflicts.push(MergeConflict {
+                node_id: nid.clone(),
+                conflict_type: ConflictType::ContentConflict {
+                    base: base_node.content.clone(),
+                    ours: ours_node.content.clone(),
+                    theirs: theirs_node.content.clone(),
+                },
+            });
         } else if theirs_changed && !ours_changed {
-            // Only theirs changed, accept theirs
-            if let Some(node) = merged.nodes.get_mut(*nid) {
+            if let Some(node) = merged.nodes.get_mut(nid) {
                 node.content = theirs_node.content.clone();
                 node.metadata = theirs_node.metadata.clone();
             }
         }
-        // If only ours changed, merged already has ours' version
 
-        // Check parent changes (structural)
         let ours_parent_changed = ours_node.parent_id != base_node.parent_id;
         let theirs_parent_changed = theirs_node.parent_id != base_node.parent_id;
-        if ours_parent_changed && theirs_parent_changed {
-            if ours_node.parent_id != theirs_node.parent_id {
-                conflicts.push(MergeConflict {
-                    node_id: (*nid).clone(),
-                    conflict_type: ConflictType::StructuralConflict {
-                        base_parent: base_node.parent_id.clone().unwrap_or(NodeId("".to_string())),
-                        ours_parent: ours_node
-                            .parent_id
-                            .clone()
-                            .unwrap_or(NodeId("".to_string())),
-                        theirs_parent: theirs_node
-                            .parent_id
-                            .clone()
-                            .unwrap_or(NodeId("".to_string())),
-                    },
-                });
-            }
+
+        if ours_parent_changed && theirs_parent_changed
+            && ours_node.parent_id != theirs_node.parent_id
+        {
+            conflicts.push(MergeConflict {
+                node_id: nid.clone(),
+                conflict_type: ConflictType::StructuralConflict {
+                    base_parent: parent_id_or_empty(base_node),
+                    ours_parent: parent_id_or_empty(ours_node),
+                    theirs_parent: parent_id_or_empty(theirs_node),
+                },
+            });
         } else if theirs_parent_changed && !ours_parent_changed {
-            // Accept theirs' reparent — collect info first to avoid borrow issues
-            let old_parent_id = merged
-                .nodes
-                .get(*nid)
-                .and_then(|n| n.parent_id.clone());
-            let new_parent_id = theirs_node.parent_id.clone();
-            let nid_clone = (*nid).clone();
-
-            // Remove from old parent's children
-            if let Some(ref old_pid) = old_parent_id {
-                if let Some(old_parent) = merged.nodes.get_mut(old_pid) {
-                    old_parent.children.retain(|c| c != &nid_clone);
-                }
-            }
-            // Update node's parent
-            if let Some(node) = merged.nodes.get_mut(*nid) {
-                node.parent_id = new_parent_id.clone();
-            }
-            // Add to new parent's children
-            if let Some(ref new_pid) = new_parent_id {
-                if let Some(new_parent) = merged.nodes.get_mut(new_pid) {
-                    if !new_parent.children.contains(&nid_clone) {
-                        new_parent.children.push(nid_clone);
-                    }
-                }
-            }
+            reparent_node(&mut merged, nid, &theirs_node.parent_id);
         }
     }
 
-    // 5. Links — same logic
-    let base_link_ids: HashSet<&LinkId> = base.links.keys().collect();
-    let ours_link_ids: HashSet<&LinkId> = ours.links.keys().collect();
-    let theirs_link_ids: HashSet<&LinkId> = theirs.links.keys().collect();
-
-    // Links added by theirs
-    for lid in &theirs_link_ids {
-        if !base_link_ids.contains(lid) && !ours_link_ids.contains(lid) {
-            let link = theirs.links.get(*lid).unwrap().clone();
-            // Check if referenced nodes exist in merged
-            if merged.nodes.contains_key(&link.from_node)
-                && merged.nodes.contains_key(&link.to_node)
-            {
-                merged.links.insert((*lid).clone(), link);
-            }
+    // 4. Links added by theirs
+    for (lid, link) in &theirs.links {
+        if !base.links.contains_key(lid)
+            && !ours.links.contains_key(lid)
+            && merged.nodes.contains_key(&link.from_node)
+            && merged.nodes.contains_key(&link.to_node)
+        {
+            merged.links.insert(lid.clone(), link.clone());
         }
     }
 
-    // Links removed by theirs (in base but not theirs)
-    for lid in &base_link_ids {
-        if !theirs_link_ids.contains(lid) && ours_link_ids.contains(lid) {
-            merged.links.remove(*lid);
+    // Links removed by theirs
+    for lid in base.links.keys() {
+        if !theirs.links.contains_key(lid) && ours.links.contains_key(lid) {
+            merged.links.remove(lid);
         }
     }
 
@@ -337,31 +297,16 @@ pub fn three_way_merge(base: &Graph, ours: &Graph, theirs: &Graph) -> MergeResul
 /// Apply conflict resolutions to a merged graph.
 pub fn apply_resolutions(graph: &mut Graph, resolutions: &[ConflictResolution]) {
     for res in resolutions {
-        match &res.resolved_content {
-            Some(content) => {
-                // Keep the node with resolved content
-                if let Some(node) = graph.nodes.get_mut(&res.node_id) {
-                    node.content = content.clone();
-                }
+        if let Some(content) = &res.resolved_content {
+            if let Some(node) = graph.nodes.get_mut(&res.node_id) {
+                node.content = content.clone();
             }
-            None => {
-                // Confirm deletion — clone parent_id to avoid borrow conflict
-                let parent_id = graph
-                    .nodes
-                    .get(&res.node_id)
-                    .and_then(|n| n.parent_id.clone());
-                if let Some(parent_id) = parent_id {
-                    if let Some(parent) = graph.nodes.get_mut(&parent_id) {
-                        parent.children.retain(|c| c != &res.node_id);
-                    }
-                }
-                graph.nodes.remove(&res.node_id);
-                // Remove links referencing deleted node
-                let node_id = res.node_id.clone();
-                graph.links.retain(|_, link| {
-                    link.from_node != node_id && link.to_node != node_id
-                });
-            }
+        } else {
+            remove_node(graph, &res.node_id);
+            let node_id = &res.node_id;
+            graph
+                .links
+                .retain(|_, link| link.from_node != *node_id && link.to_node != *node_id);
         }
     }
 }

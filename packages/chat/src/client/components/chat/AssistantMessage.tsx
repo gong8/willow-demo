@@ -14,20 +14,7 @@ import { IndexerIndicator } from "./IndexerIndicator.js";
 import { ReasoningDisplay } from "./ReasoningDisplay.js";
 import { SearchIndicator } from "./SearchIndicator.js";
 import { WillowToolCallDisplay } from "./WillowToolCallDisplay.js";
-
-function formatTimestamp(date: Date): string {
-	return date.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
-}
-
-function MessageTimestamp() {
-	const createdAt = useMessage((m) => m.createdAt);
-	if (!createdAt) return null;
-	return (
-		<span className="text-xs text-muted-foreground/60 select-none">
-			{formatTimestamp(createdAt)}
-		</span>
-	);
-}
+import { MessageTimestamp, actionButtonClass } from "./message-utils.js";
 
 function MarkdownText() {
 	return <MarkdownTextPrimitive remarkPlugins={[remarkGfm]} />;
@@ -80,11 +67,11 @@ export function AssistantMessage() {
 					<ActionBarPrimitive.Root className="flex items-center gap-1">
 						<ActionBarPrimitive.Copy
 							copiedDuration={2000}
-							className="rounded-md p-1.5 text-muted-foreground hover:text-foreground hover:bg-accent transition-colors"
+							className={actionButtonClass}
 						>
 							<ClipboardCopy className="h-4 w-4" />
 						</ActionBarPrimitive.Copy>
-						<ActionBarPrimitive.Reload className="rounded-md p-1.5 text-muted-foreground hover:text-foreground hover:bg-accent transition-colors">
+						<ActionBarPrimitive.Reload className={actionButtonClass}>
 							<RefreshCw className="h-4 w-4" />
 						</ActionBarPrimitive.Reload>
 					</ActionBarPrimitive.Root>

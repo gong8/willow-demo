@@ -1,5 +1,20 @@
 // Willow knowledge graph JSON structure (as stored in graph.json)
 
+export type NodeType =
+	| "root"
+	| "category"
+	| "collection"
+	| "entity"
+	| "attribute"
+	| "event"
+	| "detail";
+export type LayoutType =
+	| "forceDirected2d"
+	| "circular2d"
+	| "radialOut2d"
+	| "hierarchicalTd"
+	| "nooverlap";
+
 export interface WillowNodeMeta {
 	source?: string;
 	confidence?: string;
@@ -16,14 +31,7 @@ export interface WillowNodeHistory {
 
 export interface WillowNode {
 	id: string;
-	node_type:
-		| "root"
-		| "category"
-		| "collection"
-		| "entity"
-		| "attribute"
-		| "event"
-		| "detail";
+	node_type: NodeType;
 	content: string;
 	parent_id: string | null;
 	children: string[];
@@ -75,18 +83,3 @@ export interface GraphStats {
 	relationTypes: string[];
 	linksByRelation: Record<string, number>;
 }
-
-export type NodeType =
-	| "root"
-	| "category"
-	| "collection"
-	| "entity"
-	| "attribute"
-	| "event"
-	| "detail";
-export type LayoutType =
-	| "forceDirected2d"
-	| "circular2d"
-	| "radialOut2d"
-	| "hierarchicalTd"
-	| "nooverlap";

@@ -128,34 +128,39 @@ export function needsSplitPasses(
 	return total > 50;
 }
 
-/** Build user prompt for just the fix pass (critical + warning). */
+function filterFindings(
+	preScanFindings: Finding[],
+	crawlerReports: CrawlerReport[],
+	predicate: (f: Finding) => boolean,
+): { preScan: Finding[]; reports: CrawlerReport[] } {
+	return {
+		preScan: preScanFindings.filter(predicate),
+		reports: crawlerReports.map((r) => ({
+			...r,
+			findings: r.findings.filter(predicate),
+		})),
+	};
+}
+
 export function buildFixPassPrompt(
 	preScanFindings: Finding[],
 	crawlerReports: CrawlerReport[],
 ): string {
-	const criticalAndWarning = [
-		...preScanFindings.filter((f) => f.severity !== "suggestion"),
-		...crawlerReports.flatMap((r) =>
-			r.findings.filter((f) => f.severity !== "suggestion"),
-		),
-	];
-
-	return buildResolverUserPrompt(
-		criticalAndWarning.filter((f) => f.source === "pre-scan"),
-		crawlerReports.map((r) => ({
-			...r,
-			findings: r.findings.filter((f) => f.severity !== "suggestion"),
-		})),
+	const { preScan, reports } = filterFindings(
+		preScanFindings,
+		crawlerReports,
+		(f) => f.severity !== "suggestion",
 	);
+	return buildResolverUserPrompt(preScan, reports);
 }
 
-/** Build user prompt for just the enhancement pass (suggestions). */
-export function buildEnhancementPassPrompt(crawlerReports: CrawlerReport[]): string {
-	return buildResolverUserPrompt(
+export function buildEnhancementPassPrompt(
+	crawlerReports: CrawlerReport[],
+): string {
+	const { reports } = filterFindings(
 		[],
-		crawlerReports.map((r) => ({
-			...r,
-			findings: r.findings.filter((f) => f.severity === "suggestion"),
-		})),
+		crawlerReports,
+		(f) => f.severity === "suggestion",
 	);
+	return buildResolverUserPrompt([], reports);
 }

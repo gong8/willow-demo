@@ -1,6 +1,7 @@
 use crate::error::WillowError;
 use crate::model::Graph;
 use crate::vcs::types::{CommitData, CommitHash, Delta, HeadState, RepoConfig};
+use serde::Serialize;
 use sha2::{Digest, Sha256};
 use std::io::Read;
 use std::path::{Path, PathBuf};
@@ -29,16 +30,20 @@ impl ObjectStore {
 
     // ---- Path helpers ----
 
+    fn object_dir(&self, kind: &str) -> PathBuf {
+        self.repo_path.join("objects").join(kind)
+    }
+
     fn commits_dir(&self) -> PathBuf {
-        self.repo_path.join("objects").join("commits")
+        self.object_dir("commits")
     }
 
     fn snapshots_dir(&self) -> PathBuf {
-        self.repo_path.join("objects").join("snapshots")
+        self.object_dir("snapshots")
     }
 
     fn deltas_dir(&self) -> PathBuf {
-        self.repo_path.join("objects").join("deltas")
+        self.object_dir("deltas")
     }
 
     fn refs_heads_dir(&self) -> PathBuf {
@@ -53,18 +58,39 @@ impl ObjectStore {
         self.repo_path.join("config.json")
     }
 
-    // ---- Config ----
+    // ---- Generic JSON helpers ----
 
-    pub fn write_config(&self, config: &RepoConfig) -> Result<(), WillowError> {
-        let json = serde_json::to_string_pretty(config)?;
-        std::fs::write(self.config_path(), json)?;
+    fn write_json<T: Serialize>(&self, path: &Path, data: &T) -> Result<(), WillowError> {
+        let json = serde_json::to_string_pretty(data)?;
+        std::fs::write(path, json)?;
         Ok(())
     }
 
+    fn read_json<T: serde::de::DeserializeOwned>(&self, path: &Path) -> Result<T, WillowError> {
+        let data = std::fs::read_to_string(path)?;
+        let value: T = serde_json::from_str(&data)?;
+        Ok(value)
+    }
+
+    fn read_json_or_not_found<T: serde::de::DeserializeOwned>(
+        &self,
+        path: &Path,
+        hash: &CommitHash,
+    ) -> Result<T, WillowError> {
+        if !path.exists() {
+            return Err(WillowError::VcsCommitNotFound(hash.0.clone()));
+        }
+        self.read_json(path)
+    }
+
+    // ---- Config ----
+
+    pub fn write_config(&self, config: &RepoConfig) -> Result<(), WillowError> {
+        self.write_json(&self.config_path(), config)
+    }
+
     pub fn read_config(&self) -> Result<RepoConfig, WillowError> {
-        let data = std::fs::read_to_string(self.config_path())?;
-        let config: RepoConfig = serde_json::from_str(&data)?;
-        Ok(config)
+        self.read_json(&self.config_path())
     }
 
     // ---- HEAD ----
@@ -144,21 +170,12 @@ impl ObjectStore {
 
     pub fn write_commit(&self, hash: &CommitHash, data: &CommitData) -> Result<(), WillowError> {
         debug!(hash = %hash.0, "writing commit");
-        let path = self.commits_dir().join(&hash.0);
-        let json = serde_json::to_string_pretty(data)?;
-        std::fs::write(path, json)?;
-        Ok(())
+        self.write_json(&self.commits_dir().join(&hash.0), data)
     }
 
     pub fn read_commit(&self, hash: &CommitHash) -> Result<CommitData, WillowError> {
         debug!(hash = %hash.0, "reading commit");
-        let path = self.commits_dir().join(&hash.0);
-        if !path.exists() {
-            return Err(WillowError::VcsCommitNotFound(hash.0.clone()));
-        }
-        let data = std::fs::read_to_string(path)?;
-        let commit: CommitData = serde_json::from_str(&data)?;
-        Ok(commit)
+        self.read_json_or_not_found(&self.commits_dir().join(&hash.0), hash)
     }
 
     // ---- Snapshots (zstd compressed) ----
@@ -190,21 +207,12 @@ impl ObjectStore {
 
     pub fn write_delta(&self, hash: &CommitHash, delta: &Delta) -> Result<(), WillowError> {
         debug!(hash = %hash.0, "writing delta");
-        let path = self.deltas_dir().join(&hash.0);
-        let json = serde_json::to_string_pretty(delta)?;
-        std::fs::write(path, json)?;
-        Ok(())
+        self.write_json(&self.deltas_dir().join(&hash.0), delta)
     }
 
     pub fn read_delta(&self, hash: &CommitHash) -> Result<Delta, WillowError> {
         debug!(hash = %hash.0, "reading delta");
-        let path = self.deltas_dir().join(&hash.0);
-        if !path.exists() {
-            return Err(WillowError::VcsCommitNotFound(hash.0.clone()));
-        }
-        let data = std::fs::read_to_string(path)?;
-        let delta: Delta = serde_json::from_str(&data)?;
-        Ok(delta)
+        self.read_json_or_not_found(&self.deltas_dir().join(&hash.0), hash)
     }
 
     /// Resolve HEAD to a concrete commit hash.

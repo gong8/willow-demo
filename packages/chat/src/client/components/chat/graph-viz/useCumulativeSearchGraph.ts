@@ -6,21 +6,9 @@ import type {
 	WillowGraph,
 } from "../../../lib/graph-types.js";
 import { buildSubgraphFromNodes } from "./subgraph-extractors.js";
+import { type SearchToolCall, fetchGraph } from "./types.js";
 
 const MAX_MERGED_NODES = 80;
-
-interface SearchToolCall {
-	toolCallId: string;
-	toolName: string;
-	args: Record<string, unknown>;
-	result?: unknown;
-	isError?: boolean;
-}
-
-async function fetchGraph(): Promise<WillowGraph> {
-	const res = await fetch("/api/graph");
-	return res.json();
-}
 
 export interface WalkStep {
 	toolCallId: string;
@@ -71,7 +59,6 @@ export interface CumulativeSearchGraphState {
 	actives: string[];
 	steps: WalkStep[];
 	activeStepIndex: number;
-	setActiveStepIndex: (index: number) => void;
 }
 
 export function useCumulativeSearchGraph(
@@ -82,7 +69,6 @@ export function useCumulativeSearchGraph(
 		queryFn: fetchGraph,
 	});
 
-	// Parse every tool call and accumulate all visited node IDs
 	const { steps, mergedNodeIds, latestSettledIndex } = useMemo(() => {
 		const steps: WalkStep[] = [];
 		const mergedNodeIds = new Set<string>();
@@ -93,55 +79,31 @@ export function useCumulativeSearchGraph(
 		for (const tc of toolCalls) {
 			const action = (tc.args?.action as string) ?? "start";
 			const hasResult = tc.result != null;
+			const isDone = action === "done";
 
-			// "done" action result is plain text, not JSON
-			if (action === "done") {
-				steps.push({
-					toolCallId: tc.toolCallId,
-					action: "done",
-					positionId: null,
-					positionContent: null,
-					pathIds: [],
-					childIds: [],
-					status: hasResult ? "settled" : "pending",
-				});
-				if (hasResult) latestSettledIndex = steps.length - 1;
-				continue;
-			}
+			// Parse walk result for non-done actions that have results
+			const walkData = !isDone && hasResult ? parseWalkResult(tc.result) : null;
 
-			if (hasResult) {
-				const { positionId, positionContent, pathIds, childIds } =
-					parseWalkResult(tc.result);
-				for (const id of pathIds) {
+			if (walkData) {
+				for (const id of [...walkData.pathIds, ...walkData.childIds]) {
 					if (graph.nodes[id]) mergedNodeIds.add(id);
 				}
-				if (positionId && graph.nodes[positionId])
-					mergedNodeIds.add(positionId);
-				for (const id of childIds) {
-					if (graph.nodes[id]) mergedNodeIds.add(id);
+				if (walkData.positionId && graph.nodes[walkData.positionId]) {
+					mergedNodeIds.add(walkData.positionId);
 				}
-
-				steps.push({
-					toolCallId: tc.toolCallId,
-					action,
-					positionId,
-					positionContent,
-					pathIds,
-					childIds,
-					status: "settled",
-				});
-				latestSettledIndex = steps.length - 1;
-			} else {
-				steps.push({
-					toolCallId: tc.toolCallId,
-					action,
-					positionId: null,
-					positionContent: null,
-					pathIds: [],
-					childIds: [],
-					status: "pending",
-				});
 			}
+
+			steps.push({
+				toolCallId: tc.toolCallId,
+				action: isDone ? "done" : action,
+				positionId: walkData?.positionId ?? null,
+				positionContent: walkData?.positionContent ?? null,
+				pathIds: walkData?.pathIds ?? [],
+				childIds: walkData?.childIds ?? [],
+				status: hasResult ? "settled" : "pending",
+			});
+
+			if (hasResult) latestSettledIndex = steps.length - 1;
 		}
 
 		// Cap merged nodes
@@ -156,7 +118,6 @@ export function useCumulativeSearchGraph(
 		return { steps, mergedNodeIds, latestSettledIndex };
 	}, [graph, toolCalls]);
 
-	// Build the graph from all visited nodes
 	const subgraph = useMemo(() => {
 		if (!graph || mergedNodeIds.size < 2)
 			return { nodes: [] as GraphNode[], edges: [] as GraphEdge[] };
@@ -171,7 +132,6 @@ export function useCumulativeSearchGraph(
 		return null;
 	}, [steps, latestSettledIndex]);
 
-	// Highlight: selection = position node, no dimming — just show the whole graph
 	const selections = displayStep?.positionId ? [displayStep.positionId] : [];
 	const actives =
 		displayStep?.status === "pending" && displayStep.positionId
@@ -185,6 +145,5 @@ export function useCumulativeSearchGraph(
 		actives,
 		steps,
 		activeStepIndex: latestSettledIndex,
-		setActiveStepIndex: () => {},
 	};
 }

@@ -5,7 +5,7 @@ import { JsGraphStore } from "@willow/core";
 import { createLogger } from "../../logger.js";
 import type { ToolCallData } from "../cli-chat.js";
 import { runMaintenancePipeline } from "./pipeline.js";
-import type { MaintenanceProgress } from "./types.js";
+import type { MaintenanceProgress, MaintenanceReport } from "./types.js";
 
 const log = createLogger("maintenance");
 
@@ -32,11 +32,109 @@ export interface MaintenanceStatus {
 let currentJob: MaintenanceJob | null = null;
 let conversationsSinceLastMaintenance = 0;
 
+function getGraphPath(): string {
+	return (
+		process.env.WILLOW_GRAPH_PATH ?? resolve(homedir(), ".willow", "graph.json")
+	);
+}
+
+function ensureVcsInit(store: InstanceType<typeof JsGraphStore>): void {
+	try {
+		store.currentBranch();
+	} catch {
+		try {
+			store.vcsInit();
+		} catch {
+			/* already initialized */
+		}
+	}
+}
+
+function cleanupBranch(
+	graphPath: string,
+	branchName: string,
+	originalBranch: string | null,
+	mode: "merge" | "discard",
+): void {
+	if (!originalBranch) return;
+	try {
+		const store = JsGraphStore.open(graphPath);
+		if (store.currentBranch() === branchName) {
+			if (mode === "discard") store.discardChanges();
+			store.switchBranch(originalBranch);
+		}
+		if (mode === "merge") {
+			try {
+				store.mergeBranch(branchName);
+			} catch {
+				/* merge conflict — changes stay on maintenance branch */
+			}
+		}
+		try {
+			store.deleteBranch(branchName);
+		} catch {
+			/* best effort cleanup */
+		}
+	} catch {
+		/* best effort */
+	}
+}
+
+function handleSuccess(
+	job: MaintenanceJob,
+	report: MaintenanceReport,
+	graphPath: string,
+	branchName: string,
+	originalBranch: string | null,
+): void {
+	job.status = "complete";
+	job.completedAt = new Date();
+	log.info("Job complete", {
+		id: job.id,
+		preScanFindings: report.preScanFindings.length,
+		crawlerReports: report.crawlerReports.length,
+		resolverActions: report.resolverActions,
+		durationMs: report.durationMs,
+	});
+	conversationsSinceLastMaintenance = 0;
+
+	try {
+		const store = JsGraphStore.open(graphPath);
+		const commitResult = store.commitExternalChanges({
+			message: `Maintenance: ${job.trigger} (${report.resolverActions} actions)`,
+			source: "maintenance",
+			jobId: job.id,
+			conversationId: undefined,
+			summary: undefined,
+			toolName: undefined,
+		});
+		if (commitResult) {
+			log.info("Committed maintenance changes", { hash: commitResult });
+		}
+	} catch {
+		log.warn("VCS commit failed after maintenance");
+	}
+
+	cleanupBranch(graphPath, branchName, originalBranch, "merge");
+}
+
+function handleError(
+	job: MaintenanceJob,
+	error: Error,
+	graphPath: string,
+	branchName: string,
+	originalBranch: string | null,
+): void {
+	job.status = "error";
+	job.completedAt = new Date();
+	log.error("Job failed", { id: job.id, error: error.message });
+	cleanupBranch(graphPath, branchName, originalBranch, "discard");
+}
+
 export function runMaintenance(options: {
 	trigger: "manual" | "auto";
 	mcpServerPath: string;
 }): MaintenanceJob | null {
-	// Guard against concurrent runs
 	if (currentJob?.status === "running") {
 		return null;
 	}
@@ -52,24 +150,12 @@ export function runMaintenance(options: {
 	currentJob = job;
 	log.info("Job started", { id: job.id, trigger: options.trigger });
 
-	const graphPath =
-		process.env.WILLOW_GRAPH_PATH ??
-		resolve(homedir(), ".willow", "graph.json");
-
-	// Create a maintenance branch so changes are isolated
+	const graphPath = getGraphPath();
 	const branchName = `maintenance/${job.id.slice(0, 8)}`;
 	let originalBranch: string | null = null;
 	try {
 		const store = JsGraphStore.open(graphPath);
-		try {
-			store.currentBranch();
-		} catch {
-			try {
-				store.vcsInit();
-			} catch {
-				/* already initialized */
-			}
-		}
+		ensureVcsInit(store);
 		originalBranch = store.currentBranch();
 		store.createBranch(branchName);
 		store.switchBranch(branchName);
@@ -77,7 +163,6 @@ export function runMaintenance(options: {
 		// If branching fails, fall through — pipeline will still commit on whatever branch
 	}
 
-	// Run the multi-agent maintenance pipeline
 	runMaintenancePipeline({
 		mcpServerPath: options.mcpServerPath,
 		trigger: options.trigger,
@@ -85,72 +170,12 @@ export function runMaintenance(options: {
 			job.progress = progress;
 		},
 	})
-		.then((report) => {
-			job.status = "complete";
-			job.completedAt = new Date();
-			log.info("Job complete", {
-				id: job.id,
-				preScanFindings: report.preScanFindings.length,
-				crawlerReports: report.crawlerReports.length,
-				resolverActions: report.resolverActions,
-				durationMs: report.durationMs,
-			});
-			conversationsSinceLastMaintenance = 0;
-
-			// Commit on maintenance branch, switch back, merge
-			try {
-				const store = JsGraphStore.open(graphPath);
-
-				const commitResult = store.commitExternalChanges({
-					message: `Maintenance: ${job.trigger} (${report.resolverActions} actions)`,
-					source: "maintenance",
-					jobId: job.id,
-					conversationId: undefined,
-					summary: undefined,
-					toolName: undefined,
-				});
-
-				if (commitResult) {
-					log.info("Committed maintenance changes", { hash: commitResult });
-				}
-
-				// Merge maintenance branch back and clean up
-				if (originalBranch && store.currentBranch() === branchName) {
-					store.switchBranch(originalBranch);
-					try {
-						store.mergeBranch(branchName);
-					} catch {
-						// Merge conflict — changes stay on the maintenance branch
-					}
-					try {
-						store.deleteBranch(branchName);
-					} catch {
-						/* best effort cleanup */
-					}
-				}
-			} catch {
-				log.warn("VCS commit failed after maintenance");
-			}
-		})
-		.catch((e) => {
-			job.status = "error";
-			job.completedAt = new Date();
-			log.error("Job failed", { id: job.id, error: (e as Error).message });
-
-			// Discard maintenance branch on error
-			if (originalBranch) {
-				try {
-					const store = JsGraphStore.open(graphPath);
-					if (store.currentBranch() === branchName) {
-						store.discardChanges();
-						store.switchBranch(originalBranch);
-					}
-					store.deleteBranch(branchName);
-				} catch {
-					/* best effort */
-				}
-			}
-		});
+		.then((report) =>
+			handleSuccess(job, report, graphPath, branchName, originalBranch),
+		)
+		.catch((e) =>
+			handleError(job, e as Error, graphPath, branchName, originalBranch),
+		);
 
 	return job;
 }

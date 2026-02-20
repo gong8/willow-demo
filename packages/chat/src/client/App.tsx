@@ -1,7 +1,10 @@
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { useQueryClient } from "@tanstack/react-query";
+import {
+	QueryClient,
+	QueryClientProvider,
+	useQueryClient,
+} from "@tanstack/react-query";
 import { MessageSquare, Plus } from "lucide-react";
-import { useState } from "react";
+import { useCallback, useState } from "react";
 import {
 	type ActiveView,
 	ConversationSidebar,
@@ -14,15 +17,7 @@ import { createConversation } from "./lib/api.js";
 
 const queryClient = new QueryClient();
 
-function EmptyState({ onCreated }: { onCreated: (id: string) => void }) {
-	const qc = useQueryClient();
-
-	const handleNew = async () => {
-		const conv = await createConversation();
-		qc.invalidateQueries({ queryKey: ["conversations"] });
-		onCreated(conv.id);
-	};
-
+function EmptyState({ onNew }: { onNew: () => void }) {
 	return (
 		<div className="flex h-full flex-col items-center justify-center gap-4">
 			<MessageSquare className="h-12 w-12 text-muted-foreground/40" />
@@ -33,7 +28,7 @@ function EmptyState({ onCreated }: { onCreated: (id: string) => void }) {
 			</div>
 			<button
 				type="button"
-				onClick={handleNew}
+				onClick={onNew}
 				className="flex items-center gap-2 rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:opacity-90"
 			>
 				<Plus className="h-4 w-4" />
@@ -44,16 +39,24 @@ function EmptyState({ onCreated }: { onCreated: (id: string) => void }) {
 }
 
 function ChatApp() {
+	const qc = useQueryClient();
 	const [activeConversationId, setActiveConversationId] = useState<
 		string | null
 	>(null);
 	const [activeView, setActiveView] = useState<ActiveView>("chat");
+
+	const handleNew = useCallback(async () => {
+		const conv = await createConversation();
+		qc.invalidateQueries({ queryKey: ["conversations"] });
+		setActiveConversationId(conv.id);
+	}, [qc]);
 
 	return (
 		<div className="flex h-screen bg-background text-foreground">
 			<ConversationSidebar
 				activeId={activeConversationId}
 				onSelect={setActiveConversationId}
+				onNew={handleNew}
 				activeView={activeView}
 				onViewChange={setActiveView}
 			/>
@@ -75,9 +78,7 @@ function ChatApp() {
 						/>
 					</div>
 				) : (
-					activeView === "chat" && (
-						<EmptyState onCreated={(id) => setActiveConversationId(id)} />
-					)
+					activeView === "chat" && <EmptyState onNew={handleNew} />
 				)}
 			</div>
 		</div>

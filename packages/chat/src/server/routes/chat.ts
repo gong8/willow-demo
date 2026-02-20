@@ -1,5 +1,4 @@
 import { resolve } from "node:path";
-import { PrismaClient } from "@prisma/client";
 import { Hono } from "hono";
 import { streamSSE } from "hono/streaming";
 import { z } from "zod";
@@ -16,9 +15,9 @@ import {
 	startStream,
 	subscribe,
 } from "../services/stream-manager.js";
+import { db } from "./db.js";
 
 const log = createLogger("chat");
-const db = new PrismaClient();
 
 // Resolve the MCP server entry point
 const MCP_SERVER_PATH = resolve(

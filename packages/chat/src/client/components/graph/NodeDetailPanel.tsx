@@ -1,5 +1,23 @@
 import { X } from "lucide-react";
+import type { ReactNode } from "react";
 import type { WillowGraph, WillowNode } from "../../lib/graph-types.js";
+
+function Section({
+	title,
+	children,
+}: {
+	title: string;
+	children: ReactNode;
+}) {
+	return (
+		<section className="mb-4">
+			<h4 className="mb-1 text-xs font-medium uppercase tracking-wider text-muted-foreground">
+				{title}
+			</h4>
+			{children}
+		</section>
+	);
+}
 
 export function NodeDetailPanel({
 	node,
@@ -10,20 +28,16 @@ export function NodeDetailPanel({
 	graph: WillowGraph;
 	onClose: () => void;
 }) {
-	// Find parent
 	const parent = node.parent_id ? graph.nodes[node.parent_id] : null;
-
-	// Find children
-	const children = (node.children ?? []).map((id) => graph.nodes[id]).filter(Boolean);
-
-	// Find links involving this node
+	const children = (node.children ?? [])
+		.map((id) => graph.nodes[id])
+		.filter(Boolean);
 	const links = Object.values(graph.links).filter(
 		(l) => l.from_node === node.id || l.to_node === node.id,
 	);
 
 	return (
 		<div className="flex w-72 shrink-0 flex-col border-l border-border bg-muted/20">
-			{/* Header */}
 			<div className="flex items-start justify-between border-b border-border p-3">
 				<div className="min-w-0 flex-1">
 					<span className="inline-block rounded-full bg-accent px-2 py-0.5 text-[10px] font-medium uppercase tracking-wider text-accent-foreground">
@@ -40,30 +54,18 @@ export function NodeDetailPanel({
 			</div>
 
 			<div className="flex-1 overflow-y-auto p-3">
-				{/* Content */}
-				<section className="mb-4">
-					<h4 className="mb-1 text-xs font-medium uppercase tracking-wider text-muted-foreground">
-						Content
-					</h4>
+				<Section title="Content">
 					<p className="text-sm text-foreground">{node.content}</p>
-				</section>
+				</Section>
 
-				{/* Parent */}
 				{parent && (
-					<section className="mb-4">
-						<h4 className="mb-1 text-xs font-medium uppercase tracking-wider text-muted-foreground">
-							Parent
-						</h4>
+					<Section title="Parent">
 						<p className="text-sm text-muted-foreground">{parent.content}</p>
-					</section>
+					</Section>
 				)}
 
-				{/* Children */}
 				{children.length > 0 && (
-					<section className="mb-4">
-						<h4 className="mb-1 text-xs font-medium uppercase tracking-wider text-muted-foreground">
-							Children ({children.length})
-						</h4>
+					<Section title={`Children (${children.length})`}>
 						<ul className="space-y-1">
 							{children.map((child) => (
 								<li key={child.id} className="text-sm text-muted-foreground">
@@ -71,15 +73,11 @@ export function NodeDetailPanel({
 								</li>
 							))}
 						</ul>
-					</section>
+					</Section>
 				)}
 
-				{/* Cross-links */}
 				{links.length > 0 && (
-					<section className="mb-4">
-						<h4 className="mb-1 text-xs font-medium uppercase tracking-wider text-muted-foreground">
-							Links ({links.length})
-						</h4>
+					<Section title={`Links (${links.length})`}>
 						<ul className="space-y-1">
 							{links.map((link) => {
 								const otherId =
@@ -95,15 +93,11 @@ export function NodeDetailPanel({
 								);
 							})}
 						</ul>
-					</section>
+					</Section>
 				)}
 
-				{/* Metadata */}
 				{node.metadata && Object.keys(node.metadata).length > 0 && (
-					<section className="mb-4">
-						<h4 className="mb-1 text-xs font-medium uppercase tracking-wider text-muted-foreground">
-							Metadata
-						</h4>
+					<Section title="Metadata">
 						<dl className="space-y-0.5 text-sm">
 							{Object.entries(node.metadata).map(([key, value]) => (
 								<div key={key} className="flex gap-2">
@@ -112,15 +106,11 @@ export function NodeDetailPanel({
 								</div>
 							))}
 						</dl>
-					</section>
+					</Section>
 				)}
 
-				{/* History */}
 				{node.history?.length > 0 && (
-					<section className="mb-4">
-						<h4 className="mb-1 text-xs font-medium uppercase tracking-wider text-muted-foreground">
-							History ({node.history.length})
-						</h4>
+					<Section title={`History (${node.history.length})`}>
 						<ul className="space-y-2">
 							{node.history.map((entry, i) => (
 								<li key={i} className="text-sm">
@@ -132,21 +122,17 @@ export function NodeDetailPanel({
 								</li>
 							))}
 						</ul>
-					</section>
+					</Section>
 				)}
 
-				{/* Timestamps */}
-				<section>
-					<h4 className="mb-1 text-xs font-medium uppercase tracking-wider text-muted-foreground">
-						Dates
-					</h4>
+				<Section title="Dates">
 					<p className="text-xs text-muted-foreground">
 						Created: {new Date(node.created_at).toLocaleDateString()}
 					</p>
 					<p className="text-xs text-muted-foreground">
 						Updated: {new Date(node.updated_at).toLocaleDateString()}
 					</p>
-				</section>
+				</Section>
 			</div>
 		</div>
 	);

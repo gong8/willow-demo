@@ -11,9 +11,6 @@ pub enum WillowError {
     #[error("Cannot delete root node")]
     CannotDeleteRoot,
 
-    #[error("Graph already has a root node")]
-    DuplicateRoot,
-
     #[error("Parent node not found: {0}")]
     ParentNotFound(String),
 

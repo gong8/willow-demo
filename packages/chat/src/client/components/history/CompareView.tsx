@@ -1,6 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import { X } from "lucide-react";
-import { useCallback, useMemo, useState } from "react";
+import { useMemo } from "react";
 import { GraphCanvas } from "reagraph";
 import {
 	type ChangeSummary,
@@ -19,8 +19,8 @@ import type {
 	WillowGraph,
 } from "../../lib/graph-types.js";
 import { NodeDetailPanel } from "../graph/NodeDetailPanel.js";
+import { useGraphSelection } from "./useGraphSelection.js";
 
-// Colors for diff overlay
 const DIFF_COLORS = {
 	added: "#22c55e",
 	deleted: "#ef4444",
@@ -34,12 +34,10 @@ function buildDiffGraph(
 ): { nodes: GraphNode[]; edges: GraphEdge[] } {
 	const createdIds = new Set(diff.nodesCreated.map((n) => n.nodeId));
 	const updatedIds = new Set(diff.nodesUpdated.map((n) => n.nodeId));
-	const deletedIds = new Set(diff.nodesDeleted.map((n) => n.nodeId));
 
 	const nodes: GraphNode[] = [];
 	const edges: GraphEdge[] = [];
 
-	// Add all nodes from the "to" graph with diff-based colors
 	for (const [id, node] of Object.entries(graph.nodes)) {
 		let fill: string;
 		if (createdIds.has(id)) {
@@ -61,7 +59,6 @@ function buildDiffGraph(
 		});
 	}
 
-	// Add deleted nodes (not in the "to" graph)
 	for (const deleted of diff.nodesDeleted) {
 		if (!graph.nodes[deleted.nodeId]) {
 			nodes.push({
@@ -78,7 +75,6 @@ function buildDiffGraph(
 
 	const nodeIdSet = new Set(nodes.map((n) => n.id));
 
-	// Tree edges
 	for (const [id, node] of Object.entries(graph.nodes)) {
 		if (node.parent_id && nodeIdSet.has(node.parent_id)) {
 			edges.push({
@@ -91,7 +87,6 @@ function buildDiffGraph(
 		}
 	}
 
-	// Cross-link edges
 	for (const link of Object.values(graph.links)) {
 		if (nodeIdSet.has(link.from_node) && nodeIdSet.has(link.to_node)) {
 			edges.push({
@@ -128,18 +123,8 @@ export function CompareView({
 		queryFn: () => diffCommits(fromHash, toHash),
 	});
 
-	const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
-	const [selections, setSelections] = useState<string[]>([]);
-
-	const handleNodeClick = useCallback((node: { id: string }) => {
-		setSelectedNodeId(node.id);
-		setSelections([node.id]);
-	}, []);
-
-	const handleCanvasClick = useCallback(() => {
-		setSelectedNodeId(null);
-		setSelections([]);
-	}, []);
+	const { selectedNodeId, selections, handleNodeClick, handleCanvasClick } =
+		useGraphSelection();
 
 	const { nodes, edges } = useMemo(() => {
 		if (!toGraph || !diff) return { nodes: [], edges: [] };

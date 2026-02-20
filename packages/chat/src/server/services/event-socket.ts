@@ -4,15 +4,14 @@ import { type Server, createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createLogger } from "../logger.js";
+import type { SSEEmitter } from "./cli-chat.js";
 import { LineBuffer } from "./line-buffer.js";
 
 const log = createLogger("event-socket");
 
-type EventCallback = (event: string, data: string) => void;
-
 export interface EventSocket {
 	socketPath: string;
-	onEvent(cb: EventCallback): void;
+	onEvent(cb: SSEEmitter): void;
 	cleanup(): void;
 }
 
@@ -29,7 +28,7 @@ export function createEventSocket(): EventSocket {
 	);
 
 	log.debug("Socket created", { path: socketPath });
-	const callbacks: EventCallback[] = [];
+	const callbacks: SSEEmitter[] = [];
 
 	const server: Server = createServer((conn) => {
 		log.debug("Client connected");
@@ -58,7 +57,7 @@ export function createEventSocket(): EventSocket {
 
 	return {
 		socketPath,
-		onEvent(cb: EventCallback) {
+		onEvent(cb: SSEEmitter) {
 			callbacks.push(cb);
 		},
 		cleanup() {

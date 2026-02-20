@@ -1,19 +1,5 @@
-import { createLogger } from "../logger.js";
-import { getDisallowedTools } from "./agent-tools.js";
-import type { SSEEmitter, ToolCallData } from "./cli-chat.js";
-import {
-	LLM_MODEL,
-	cleanupDir,
-	createInvocationDir,
-	createStreamParser,
-	getCliModel,
-	pipeStdout,
-	spawnCli,
-	writeMcpConfig,
-	writeSystemPrompt,
-} from "./cli-chat.js";
-
-const log = createLogger("indexer");
+import { runAgent } from "./agent-runner.js";
+import type { SSEEmitter } from "./cli-chat.js";
 
 const INDEXER_SYSTEM_PROMPT = `You are a background knowledge-graph indexer. Your ONLY job is to analyze a conversation and update the user's knowledge graph with any new facts.
 
@@ -59,135 +45,18 @@ export interface RunIndexerAgentOptions {
 	signal?: AbortSignal;
 }
 
-export function runIndexerAgent(
+export async function runIndexerAgent(
 	options: RunIndexerAgentOptions,
 ): Promise<void> {
 	const { userMessage, assistantResponse, mcpServerPath, emitSSE, signal } =
 		options;
 
-	return new Promise((resolve) => {
-		log.info("Indexer started");
-		const toolCalls: ToolCallData[] = [];
-
-		const invocationDir = createInvocationDir();
-		const mcpConfigPath = writeMcpConfig(invocationDir, mcpServerPath);
-		const systemPromptPath = writeSystemPrompt(
-			invocationDir,
-			INDEXER_SYSTEM_PROMPT,
-		);
-
-		const prompt = `<conversation>\nUser: ${userMessage}\nAssistant: ${assistantResponse}\n</conversation>\nAnalyze the above and update the knowledge graph with any new facts about the user.`;
-
-		const args = [
-			"--print",
-			"--output-format",
-			"stream-json",
-			"--verbose",
-			"--include-partial-messages",
-			"--model",
-			getCliModel(LLM_MODEL),
-			"--dangerously-skip-permissions",
-			"--mcp-config",
-			mcpConfigPath,
-			"--strict-mcp-config",
-			"--disallowedTools",
-			...getDisallowedTools("indexer"),
-			"--append-system-prompt-file",
-			systemPromptPath,
-			"--setting-sources",
-			"",
-			"--no-session-persistence",
-			"--max-turns",
-			"10",
-			prompt,
-		];
-
-		let proc: ReturnType<typeof spawnCli>;
-		try {
-			proc = spawnCli(args, invocationDir);
-		} catch {
-			log.error("CLI spawn failed");
-			cleanupDir(invocationDir);
-			resolve();
-			return;
-		}
-
-		// Emit tool call events to the parent stream with indexer__ prefix
-		const indexerEmitter: SSEEmitter = (event, data) => {
-			try {
-				const parsed = JSON.parse(data);
-				if (event === "tool_call_start") {
-					const prefixedId = `indexer__${parsed.toolCallId}`;
-					toolCalls.push({
-						toolCallId: prefixedId,
-						toolName: parsed.toolName as string,
-						args: {},
-						phase: "indexer",
-					});
-					emitSSE(
-						"tool_call_start",
-						JSON.stringify({
-							toolCallId: prefixedId,
-							toolName: parsed.toolName,
-						}),
-					);
-				} else if (event === "tool_call_args") {
-					const prefixedId = `indexer__${parsed.toolCallId}`;
-					const tc = toolCalls.find((t) => t.toolCallId === prefixedId);
-					if (tc) tc.args = parsed.args as Record<string, unknown>;
-					emitSSE(
-						"tool_call_args",
-						JSON.stringify({
-							toolCallId: prefixedId,
-							toolName: parsed.toolName,
-							args: parsed.args,
-						}),
-					);
-				} else if (event === "tool_result") {
-					const prefixedId = `indexer__${parsed.toolCallId}`;
-					const tc = toolCalls.find((t) => t.toolCallId === prefixedId);
-					if (tc) {
-						tc.result = parsed.result as string;
-						tc.isError = parsed.isError as boolean;
-					}
-					emitSSE(
-						"tool_result",
-						JSON.stringify({
-							toolCallId: prefixedId,
-							result: parsed.result,
-							isError: parsed.isError,
-						}),
-					);
-				}
-				// Content from indexer is silently discarded (no text output needed)
-			} catch {
-				log.debug("Emitter parse error");
-			}
-		};
-
-		const parser = createStreamParser(indexerEmitter);
-		proc.stdin?.end();
-
-		if (signal) {
-			signal.addEventListener("abort", () => {
-				proc.kill("SIGTERM");
-			});
-		}
-
-		pipeStdout(proc, parser);
-
-		proc.stderr?.on("data", (chunk: Buffer) => {
-			const text = chunk.toString().trim();
-			if (text) log.debug("stderr", { text: text.slice(0, 1000) });
-		});
-
-		const finish = () => {
-			cleanupDir(invocationDir);
-			log.info("Indexer complete");
-			resolve();
-		};
-
-		proc.on("close", finish);
-		proc.on("error", finish);
+	await runAgent({
+		agentName: "indexer",
+		systemPrompt: INDEXER_SYSTEM_PROMPT,
+		prompt: `<conversation>\nUser: ${userMessage}\nAssistant: ${assistantResponse}\n</conversation>\nAnalyze the above and update the knowledge graph with any new facts about the user.`,
+		mcpServerPath,
+		emitSSE,
+		signal,
 	});
 }

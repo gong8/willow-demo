@@ -8,6 +8,7 @@ import { spawnCrawlers } from "./crawler.js";
 import { runPreScan } from "./pre-scan.js";
 import { spawnResolver } from "./resolver.js";
 import type {
+	GraphStats,
 	MaintenanceProgress,
 	MaintenanceReport,
 	ProgressCallback,
@@ -24,11 +25,7 @@ function loadGraph(): RawGraph {
 	return JSON.parse(raw) as RawGraph;
 }
 
-function getGraphStats(graph: RawGraph): {
-	nodeCount: number;
-	linkCount: number;
-	categoryCount: number;
-} {
+function getGraphStats(graph: RawGraph): GraphStats {
 	const nodeCount = Object.keys(graph.nodes).length;
 	const linkCount = Object.keys(graph.links).length;
 	const rootNode = graph.nodes[graph.root_id];
@@ -102,7 +99,7 @@ export async function runMaintenancePipeline(options: {
 	}
 
 	const graphStats = getGraphStats(graph);
-	log.info("Graph loaded", graphStats);
+	log.info("Graph loaded", { ...graphStats });
 
 	// Step 2: Pre-scan (fast, no Claude)
 	emitProgress({ phase: "pre-scan", phaseLabel: "Scanning graph...", phaseStartedAt: Date.now() });

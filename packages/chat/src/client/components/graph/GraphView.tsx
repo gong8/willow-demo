@@ -13,6 +13,16 @@ import { GraphToolbar } from "./GraphToolbar.js";
 import { MaintenanceIndicator } from "./MaintenanceIndicator.js";
 import { NodeDetailPanel } from "./NodeDetailPanel.js";
 
+function toggleSetItem<T>(set: Set<T>, item: T): Set<T> {
+	const next = new Set(set);
+	if (next.has(item)) {
+		next.delete(item);
+	} else {
+		next.add(item);
+	}
+	return next;
+}
+
 async function fetchGraph(): Promise<WillowGraph> {
 	const res = await fetch("/api/graph");
 	return res.json();
@@ -47,28 +57,12 @@ export function GraphView({
 	const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
 	const [selections, setSelections] = useState<string[]>([]);
 
-	const handleToggleType = (type: NodeType) => {
-		setEnabledTypes((prev) => {
-			const next = new Set(prev);
-			if (next.has(type)) {
-				next.delete(type);
-			} else {
-				next.add(type);
-			}
-			return next;
-		});
-	};
+	const handleToggleType = useCallback((type: NodeType) => {
+		setEnabledTypes((prev) => toggleSetItem(prev, type));
+	}, []);
 
 	const handleToggleRelation = useCallback((relation: string) => {
-		setEnabledRelations((prev) => {
-			const next = new Set(prev);
-			if (next.has(relation)) {
-				next.delete(relation);
-			} else {
-				next.add(relation);
-			}
-			return next;
-		});
+		setEnabledRelations((prev) => toggleSetItem(prev, relation));
 	}, []);
 
 	const handleNodeClick = useCallback((node: { id: string }) => {

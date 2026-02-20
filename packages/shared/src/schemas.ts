@@ -15,6 +15,8 @@ export const CANONICAL_RELATIONS = [
 export type CanonicalRelation = (typeof CANONICAL_RELATIONS)[number];
 
 const relationEnum = z.enum(CANONICAL_RELATIONS);
+const confidenceEnum = z.enum(["low", "medium", "high"]);
+const optionalMetadata = z.record(z.string()).optional();
 
 const temporalMetadataSchema = z
 	.object({
@@ -24,6 +26,22 @@ const temporalMetadataSchema = z
 	})
 	.optional();
 
+const linkFieldsSchema = z.object({
+	relation: relationEnum.describe(
+		"Relationship type. Must be one of: related_to, contradicts, caused_by, leads_to, depends_on, similar_to, part_of, example_of, derived_from",
+	),
+	bidirectional: z
+		.boolean()
+		.optional()
+		.default(false)
+		.describe(
+			"If true, the link can be followed from either endpoint. Use for symmetric relations like 'related_to', 'similar_to'.",
+		),
+	confidence: confidenceEnum
+		.optional()
+		.describe("Confidence level for this link"),
+});
+
 const createNodeSchema = z.object({
 	parentId: z.string().describe("ID of the parent node"),
 	nodeType: z
@@ -32,10 +50,7 @@ const createNodeSchema = z.object({
 			"Node type: 'category' for top-level grouping, 'collection' for sub-groups, 'entity' for named things, 'attribute' for facts/properties, 'event' for time-bound occurrences, 'detail' for additional depth/elaboration on any node",
 		),
 	content: z.string().describe("The content/fact to store"),
-	metadata: z
-		.record(z.string())
-		.optional()
-		.describe("Optional key-value metadata"),
+	metadata: optionalMetadata.describe("Optional key-value metadata"),
 	temporal: temporalMetadataSchema.describe(
 		"Optional temporal bounds for time-sensitive facts",
 	),
@@ -47,10 +62,7 @@ const updateNodeSchema = z.object({
 		.string()
 		.optional()
 		.describe("New content (old content is preserved in history)"),
-	metadata: z
-		.record(z.string())
-		.optional()
-		.describe("New metadata (replaces existing)"),
+	metadata: optionalMetadata.describe("New metadata (replaces existing)"),
 	temporal: temporalMetadataSchema.describe("Updated temporal metadata"),
 	reason: z
 		.string()
@@ -61,20 +73,7 @@ const updateNodeSchema = z.object({
 const addLinkSchema = z.object({
 	fromNode: z.string().describe("Source node ID"),
 	toNode: z.string().describe("Target node ID"),
-	relation: relationEnum.describe(
-		"Relationship type. Must be one of: related_to, contradicts, caused_by, leads_to, depends_on, similar_to, part_of, example_of, derived_from",
-	),
-	bidirectional: z
-		.boolean()
-		.optional()
-		.default(false)
-		.describe(
-			"If true, the link can be followed from either endpoint. Use for symmetric relations like 'related_to', 'similar_to'.",
-		),
-	confidence: z
-		.enum(["low", "medium", "high"])
-		.optional()
-		.describe("Confidence level for this link"),
+	...linkFieldsSchema.shape,
 });
 
 const searchNodesSchema = z.object({
@@ -111,12 +110,7 @@ const deleteNodeSchema = z.object({
 
 const updateLinkSchema = z.object({
 	linkId: z.string().describe("ID of the link to update"),
-	relation: relationEnum.optional().describe("New relationship type"),
-	bidirectional: z.boolean().optional().describe("Update directionality"),
-	confidence: z
-		.enum(["low", "medium", "high"])
-		.optional()
-		.describe("Update confidence level"),
+	...linkFieldsSchema.partial().shape,
 });
 
 const deleteLinkSchema = z.object({

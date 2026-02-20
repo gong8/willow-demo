@@ -72,28 +72,24 @@ interface ToolCallState {
 	isError?: boolean;
 }
 
+type ToolCallItem = {
+	toolCallId: string;
+	toolName: string;
+	args: Record<string, unknown>;
+	result?: string;
+	isError?: boolean;
+};
+
 export interface SearchResultsPart {
 	type: "search-results";
 	searchStatus: "searching" | "done";
-	toolCalls: Array<{
-		toolCallId: string;
-		toolName: string;
-		args: Record<string, unknown>;
-		result?: string;
-		isError?: boolean;
-	}>;
+	toolCalls: ToolCallItem[];
 }
 
 export interface IndexerResultsPart {
 	type: "indexer-results";
 	indexerStatus: "running" | "done";
-	toolCalls: Array<{
-		toolCallId: string;
-		toolName: string;
-		args: Record<string, unknown>;
-		result?: string;
-		isError?: boolean;
-	}>;
+	toolCalls: ToolCallItem[];
 }
 
 type ContentPart =
@@ -151,47 +147,38 @@ function parseTextToolCalls(text: string) {
 	return { cleanText, parsedCalls };
 }
 
-interface BuildResult {
-	contentParts: ContentPart[];
-	searchResults: SearchResultsPart | null;
-	indexerResults: IndexerResultsPart | null;
+function toToolCallItem(tc: ToolCallState): ToolCallItem {
+	return {
+		toolCallId: tc.toolCallId,
+		toolName: tc.toolName,
+		args: tc.args ?? {},
+		result: tc.result,
+		isError: tc.isError,
+	};
 }
 
-function buildParts(state: SseState): BuildResult {
+function buildParts(state: SseState) {
 	const { cleanText, parsedCalls } = parseTextToolCalls(state.textContent);
 	const contentParts: ContentPart[] = [];
+	const searchCalls: ToolCallItem[] = [];
+	const indexerCalls: ToolCallItem[] = [];
 
 	if (state.thinkingText)
 		contentParts.push({ type: "reasoning", text: state.thinkingText });
 
-	// Separate tool calls by ID prefix
-	const searchCalls: SearchResultsPart["toolCalls"] = [];
-	const indexerCalls: IndexerResultsPart["toolCalls"] = [];
-
 	for (const tc of state.toolCalls.values()) {
 		if (tc.toolCallId.startsWith("search__")) {
-			searchCalls.push({
-				toolCallId: tc.toolCallId,
-				toolName: tc.toolName,
-				args: tc.args ?? {},
-				result: tc.result,
-				isError: tc.isError,
-			});
+			searchCalls.push(toToolCallItem(tc));
 		} else if (tc.toolCallId.startsWith("indexer__")) {
-			indexerCalls.push({
-				toolCallId: tc.toolCallId,
-				toolName: tc.toolName,
-				args: tc.args ?? {},
-				result: tc.result,
-				isError: tc.isError,
-			});
+			indexerCalls.push(toToolCallItem(tc));
 		} else {
+			const args = tc.args ?? {};
 			contentParts.push({
 				type: "tool-call",
 				toolCallId: tc.toolCallId,
 				toolName: tc.toolName,
-				args: tc.args ?? {},
-				argsText: JSON.stringify(tc.args ?? {}),
+				args,
+				argsText: JSON.stringify(args),
 				result: tc.result,
 				isError: tc.isError,
 			});
@@ -233,28 +220,32 @@ function buildParts(state: SseState): BuildResult {
 	return { contentParts, searchResults, indexerResults };
 }
 
+function handlePhaseEvent(
+	eventType: string,
+	status: unknown,
+	state: SseState,
+): boolean {
+	if (eventType === "search_phase") {
+		if (status === "start") state.searchPhase = "searching";
+		else if (status === "end") state.searchPhase = "done";
+		return true;
+	}
+	if (eventType === "indexer_phase") {
+		if (status === "start") state.indexerPhase = "running";
+		else if (status === "end") state.indexerPhase = "done";
+		return true;
+	}
+	return false;
+}
+
 function handleSseEvent(
 	eventType: string,
 	parsed: Record<string, unknown>,
 	state: SseState,
 ): boolean {
+	if (handlePhaseEvent(eventType, parsed.status, state)) return true;
+
 	switch (eventType) {
-		case "search_phase":
-			if (parsed.status === "start") {
-				state.searchPhase = "searching";
-			} else if (parsed.status === "end") {
-				state.searchPhase = "done";
-			}
-			return true;
-
-		case "indexer_phase":
-			if (parsed.status === "start") {
-				state.indexerPhase = "running";
-			} else if (parsed.status === "end") {
-				state.indexerPhase = "done";
-			}
-			return true;
-
 		case "content":
 			if (parsed.content) {
 				state.textContent += parsed.content as string;
@@ -320,6 +311,14 @@ function processSseLine(
 	return null;
 }
 
+function snapshot(state: SseState): ChatModelRunResult {
+	const { contentParts, searchResults, indexerResults } = buildParts(state);
+	const custom: Record<string, unknown> = {};
+	if (searchResults) custom.searchResults = searchResults;
+	if (indexerResults) custom.indexerResults = indexerResults;
+	return { content: contentParts, metadata: { custom } } as ChatModelRunResult;
+}
+
 async function* readSseStream(
 	reader: ReadableStreamDefaultReader<Uint8Array>,
 	state: SseState,
@@ -327,18 +326,6 @@ async function* readSseStream(
 	const decoder = new TextDecoder();
 	let buffer = "";
 	const ctx = { eventType: "content" };
-	const snapshot = () => {
-		const { contentParts, searchResults, indexerResults } = buildParts(state);
-		return {
-			content: contentParts,
-			metadata: {
-				custom: {
-					...(searchResults ? { searchResults } : {}),
-					...(indexerResults ? { indexerResults } : {}),
-				},
-			},
-		} as ChatModelRunResult;
-	};
 
 	try {
 		while (true) {
@@ -355,10 +342,10 @@ async function* readSseStream(
 
 				const result = processSseLine(line, state, ctx);
 				if (result === "done") {
-					yield snapshot();
+					yield snapshot(state);
 					return;
 				}
-				if (result === "updated") yield snapshot();
+				if (result === "updated") yield snapshot(state);
 			}
 		}
 	} finally {
@@ -366,7 +353,7 @@ async function* readSseStream(
 	}
 
 	if (state.textContent || state.toolCalls.size > 0 || state.thinkingText) {
-		yield snapshot();
+		yield snapshot(state);
 	}
 }
 

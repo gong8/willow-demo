@@ -1,26 +1,14 @@
 import { GitBranch } from "lucide-react";
-import type { BranchInfo } from "../../lib/api.js";
+import type { BranchInfo } from "../../lib/api";
+import { SOURCE_COLORS } from "./sourceColors";
 
 export type SourceFilter = "conversation" | "maintenance" | "manual";
 
-const SOURCE_FILTERS: { value: SourceFilter; label: string; color: string }[] =
-	[
-		{
-			value: "conversation",
-			label: "Conversation",
-			color: "bg-blue-500/15 text-blue-400 border-blue-500/30",
-		},
-		{
-			value: "maintenance",
-			label: "Maintenance",
-			color: "bg-amber-500/15 text-amber-400 border-amber-500/30",
-		},
-		{
-			value: "manual",
-			label: "Manual",
-			color: "bg-green-500/15 text-green-400 border-green-500/30",
-		},
-	];
+const SOURCE_FILTERS: { value: SourceFilter; label: string }[] = [
+	{ value: "conversation", label: "Conversation" },
+	{ value: "maintenance", label: "Maintenance" },
+	{ value: "manual", label: "Manual" },
+];
 
 export function HistoryToolbar({
 	branches,
@@ -43,8 +31,9 @@ export function HistoryToolbar({
 			</div>
 
 			<div className="flex items-center gap-1">
-				{SOURCE_FILTERS.map(({ value, label, color }) => {
+				{SOURCE_FILTERS.map(({ value, label }) => {
 					const isActive = activeFilters.has(value);
+					const color = SOURCE_COLORS[value]?.badge ?? "";
 					return (
 						<button
 							key={value}

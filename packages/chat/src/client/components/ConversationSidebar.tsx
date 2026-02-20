@@ -2,6 +2,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
 	FolderOpen,
 	History,
+	type LucideIcon,
 	MessageSquare,
 	Network,
 	Plus,
@@ -9,21 +10,29 @@ import {
 } from "lucide-react";
 import {
 	type Conversation,
-	createConversation,
 	deleteConversation,
 	fetchConversations,
 } from "../lib/api.js";
 
 export type ActiveView = "chat" | "graph" | "history" | "resources";
 
+const viewTabs: { view: ActiveView; icon: LucideIcon; title: string }[] = [
+	{ view: "chat", icon: MessageSquare, title: "Chat" },
+	{ view: "graph", icon: Network, title: "Knowledge graph" },
+	{ view: "history", icon: History, title: "Version history" },
+	{ view: "resources", icon: FolderOpen, title: "Resources" },
+];
+
 export function ConversationSidebar({
 	activeId,
 	onSelect,
+	onNew,
 	activeView,
 	onViewChange,
 }: {
 	activeId: string | null;
 	onSelect: (id: string) => void;
+	onNew: () => void;
 	activeView: ActiveView;
 	onViewChange: (view: ActiveView) => void;
 }) {
@@ -35,12 +44,6 @@ export function ConversationSidebar({
 		refetchInterval: 10000,
 	});
 
-	const handleNew = async () => {
-		const conv = await createConversation();
-		queryClient.invalidateQueries({ queryKey: ["conversations"] });
-		onSelect(conv.id);
-	};
-
 	const handleDelete = async (id: string, e: React.MouseEvent) => {
 		e.stopPropagation();
 		await deleteConversation(id);
@@ -50,9 +53,7 @@ export function ConversationSidebar({
 			if (remaining.length > 0) {
 				onSelect(remaining[0].id);
 			} else {
-				const conv = await createConversation();
-				queryClient.invalidateQueries({ queryKey: ["conversations"] });
-				onSelect(conv.id);
+				onNew();
 			}
 		}
 	};
@@ -67,57 +68,24 @@ export function ConversationSidebar({
 			<div className="flex items-center justify-between border-b border-border p-3">
 				<h1 className="text-sm font-semibold text-foreground">Willow</h1>
 				<div className="flex items-center gap-1">
+					{viewTabs.map(({ view, icon: Icon, title }) => (
+						<button
+							key={view}
+							type="button"
+							onClick={() => onViewChange(view)}
+							className={`rounded-md p-1.5 transition-colors ${
+								activeView === view
+									? "bg-accent text-accent-foreground"
+									: "text-muted-foreground hover:bg-accent hover:text-foreground"
+							}`}
+							title={title}
+						>
+							<Icon className="h-4 w-4" />
+						</button>
+					))}
 					<button
 						type="button"
-						onClick={() => onViewChange("chat")}
-						className={`rounded-md p-1.5 transition-colors ${
-							activeView === "chat"
-								? "bg-accent text-accent-foreground"
-								: "text-muted-foreground hover:bg-accent hover:text-foreground"
-						}`}
-						title="Chat"
-					>
-						<MessageSquare className="h-4 w-4" />
-					</button>
-					<button
-						type="button"
-						onClick={() => onViewChange("graph")}
-						className={`rounded-md p-1.5 transition-colors ${
-							activeView === "graph"
-								? "bg-accent text-accent-foreground"
-								: "text-muted-foreground hover:bg-accent hover:text-foreground"
-						}`}
-						title="Knowledge graph"
-					>
-						<Network className="h-4 w-4" />
-					</button>
-					<button
-						type="button"
-						onClick={() => onViewChange("history")}
-						className={`rounded-md p-1.5 transition-colors ${
-							activeView === "history"
-								? "bg-accent text-accent-foreground"
-								: "text-muted-foreground hover:bg-accent hover:text-foreground"
-						}`}
-						title="Version history"
-					>
-						<History className="h-4 w-4" />
-					</button>
-					<button
-						type="button"
-						onClick={() => onViewChange("resources")}
-						className={`rounded-md p-1.5 transition-colors ${
-							activeView === "resources"
-								? "bg-accent text-accent-foreground"
-								: "text-muted-foreground hover:bg-accent hover:text-foreground"
-						}`}
-						title="Resources"
-					>
-						<FolderOpen className="h-4 w-4" />
-					</button>
-					<button
-						type="button"
-						onClick={handleNew}
+						onClick={onNew}
 						className="rounded-md border border-border bg-background p-1.5 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
 						title="New conversation"
 					>

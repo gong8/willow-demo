@@ -724,13 +724,28 @@ export function cleanupDir(dir: string): void {
 	}
 }
 
+function trySpawnCli(
+	args: string[],
+	cwd: string,
+	emitSSE: SSEEmitter,
+): ChildProcessWithoutNullStreams | null {
+	try {
+		return spawnCli(args, cwd);
+	} catch (err) {
+		log.error("CLI spawn failed");
+		const msg = err instanceof Error ? err.message : "Unknown spawn error";
+		emitSSE("error", JSON.stringify({ error: msg }));
+		return null;
+	}
+}
+
 function wireProcessLifecycle(
 	proc: ChildProcessWithoutNullStreams,
 	emitSSE: SSEEmitter,
 	parser: ReturnType<typeof createStreamParser>,
 	invocationDir: string,
 	signal?: AbortSignal,
-): void {
+): Promise<void> {
 	proc.stdin?.end();
 
 	if (signal) {
@@ -754,16 +769,20 @@ function wireProcessLifecycle(
 		if (text) log.debug("stderr", { text: text.slice(0, 1000) });
 	});
 
-	proc.on("close", () => {
-		log.info("Process closed");
-		finalize();
-		cleanupDir(invocationDir);
-	});
+	return new Promise((resolve) => {
+		proc.on("close", () => {
+			log.info("Process closed");
+			finalize();
+			cleanupDir(invocationDir);
+			resolve();
+		});
 
-	proc.on("error", (err) => {
-		log.error("Process error");
-		finalize(err.message);
-		cleanupDir(invocationDir);
+		proc.on("error", (err) => {
+			log.error("Process error");
+			finalize(err.message);
+			cleanupDir(invocationDir);
+			resolve();
+		});
 	});
 }
 
@@ -840,13 +859,8 @@ export function streamCliChat(
 
 			const { invocationDir, args } = await prepareInvocation(options);
 
-			let proc: ChildProcessWithoutNullStreams;
-			try {
-				proc = spawnCli(args, invocationDir);
-			} catch (err) {
-				log.error("CLI spawn failed");
-				const msg = err instanceof Error ? err.message : "Unknown spawn error";
-				emit("error", JSON.stringify({ error: msg }));
+			const proc = trySpawnCli(args, invocationDir, emit);
+			if (!proc) {
 				emit("done", "[DONE]");
 				close();
 				return;
@@ -870,41 +884,18 @@ export async function runChatAgent(
 ): Promise<void> {
 	const { invocationDir, args } = await prepareInvocation(options);
 
-	return new Promise((resolve) => {
-		let proc: ChildProcessWithoutNullStreams;
-		try {
-			proc = spawnCli(args, invocationDir);
-		} catch (err) {
-			log.error("CLI spawn failed");
-			const msg = err instanceof Error ? err.message : "Unknown spawn error";
-			emitSSE("error", JSON.stringify({ error: msg }));
-			cleanupDir(invocationDir);
-			resolve();
-			return;
-		}
+	const proc = trySpawnCli(args, invocationDir, emitSSE);
+	if (!proc) {
+		cleanupDir(invocationDir);
+		return;
+	}
 
-		const parser = createStreamParser(emitSSE);
-		proc.stdin?.end();
-
-		if (options.signal) {
-			options.signal.addEventListener("abort", () => {
-				proc.kill("SIGTERM");
-			});
-		}
-
-		pipeStdout(proc, parser);
-
-		proc.stderr?.on("data", (chunk: Buffer) => {
-			const text = chunk.toString().trim();
-			if (text) log.debug("stderr", { text: text.slice(0, 1000) });
-		});
-
-		const finish = () => {
-			cleanupDir(invocationDir);
-			resolve();
-		};
-
-		proc.on("close", finish);
-		proc.on("error", finish);
-	});
+	const parser = createStreamParser(emitSSE);
+	await wireProcessLifecycle(
+		proc,
+		emitSSE,
+		parser,
+		invocationDir,
+		options.signal,
+	);
 }

@@ -1,6 +1,6 @@
 import type { PrismaClient } from "@prisma/client";
 import { createLogger } from "../logger.js";
-import type { ToolCallData } from "./cli-chat.js";
+import type { SSEEmitter, ToolCallData } from "./cli-chat.js";
 import { LineBuffer } from "./line-buffer.js";
 
 const log = createLogger("stream-manager");
@@ -10,16 +10,21 @@ interface BufferedEvent {
 	data: string;
 }
 
-type Subscriber = (event: string, data: string) => void;
-
 export interface ActiveStream {
 	conversationId: string;
 	events: BufferedEvent[];
 	status: "streaming" | "complete" | "error";
 	fullContent: string;
 	toolCallsData: ToolCallData[];
-	subscribers: Set<Subscriber>;
+	subscribers: Set<SSEEmitter>;
 	done: Promise<void>;
+}
+
+interface ParseState {
+	toolCallIndex: Map<string, number>;
+	searchActive: boolean;
+	indexerActive: boolean;
+	currentEventType: string;
 }
 
 function stripToolCallXml(text: string): string {
@@ -74,19 +79,16 @@ async function safePersist(
 
 function updateStreamState(
 	stream: ActiveStream,
-	toolCallIndex: Map<string, number>,
+	state: ParseState,
 	eventType: string,
 	parsed: Record<string, unknown>,
-	searchPhase: { active: boolean },
-	indexerPhase: { active: boolean },
 ): void {
-	// Phase events are forwarded to subscribers but don't accumulate state
 	if (eventType === "search_phase") {
-		searchPhase.active = parsed.status === "start";
+		state.searchActive = parsed.status === "start";
 		return;
 	}
 	if (eventType === "indexer_phase") {
-		indexerPhase.active = parsed.status === "start";
+		state.indexerActive = parsed.status === "start";
 		return;
 	}
 
@@ -97,9 +99,9 @@ function updateStreamState(
 
 	if (eventType === "tool_call_start") {
 		const idx = stream.toolCallsData.length;
-		const phase = searchPhase.active
+		const phase = state.searchActive
 			? "search"
-			: indexerPhase.active
+			: state.indexerActive
 				? "indexer"
 				: "chat";
 		stream.toolCallsData.push({
@@ -108,11 +110,11 @@ function updateStreamState(
 			args: {},
 			phase,
 		});
-		toolCallIndex.set(parsed.toolCallId as string, idx);
+		state.toolCallIndex.set(parsed.toolCallId as string, idx);
 		return;
 	}
 
-	const idx = toolCallIndex.get(parsed.toolCallId as string);
+	const idx = state.toolCallIndex.get(parsed.toolCallId as string);
 	if (idx === undefined) return;
 
 	if (eventType === "tool_call_args") {
@@ -125,20 +127,20 @@ function updateStreamState(
 
 function parseSSELine(
 	line: string,
-	currentEventType: { value: string },
+	state: ParseState,
 ): { type: string; data: string } | null {
 	const trimmed = line.trim();
 	if (!trimmed) return null;
 
 	if (trimmed.startsWith("event: ")) {
-		currentEventType.value = trimmed.slice(7);
+		state.currentEventType = trimmed.slice(7);
 		return null;
 	}
 
 	if (!trimmed.startsWith("data: ")) return null;
 	const data = trimmed.slice(6);
-	const type = currentEventType.value;
-	currentEventType.value = "content";
+	const type = state.currentEventType;
+	state.currentEventType = "content";
 	return { type, data };
 }
 
@@ -169,7 +171,7 @@ async function generateTitle(
 async function finalizeStream(
 	stream: ActiveStream,
 	db: PrismaClient,
-	emit: (event: string, data: string) => void,
+	emit: SSEEmitter,
 	status: "complete" | "error",
 ): Promise<void> {
 	await safePersist(db, stream.conversationId, stream);
@@ -198,16 +200,18 @@ async function consumeStream(
 	stream: ActiveStream,
 	cliStream: ReadableStream<Uint8Array>,
 	db: PrismaClient,
-	emit: (event: string, data: string) => void,
+	emit: SSEEmitter,
 	onComplete?: (fullContent: string) => void,
 ): Promise<void> {
 	const reader = cliStream.getReader();
 	const decoder = new TextDecoder();
-	const toolCallIndex = new Map<string, number>();
-	const searchPhase = { active: false };
-	const indexerPhase = { active: false };
 	const lineBuffer = new LineBuffer();
-	const currentEventType = { value: "content" };
+	const state: ParseState = {
+		toolCallIndex: new Map(),
+		searchActive: false,
+		indexerActive: false,
+		currentEventType: "content",
+	};
 	let status: "complete" | "error" = "complete";
 
 	try {
@@ -218,19 +222,12 @@ async function consumeStream(
 			for (const line of lineBuffer.push(
 				decoder.decode(value, { stream: true }),
 			)) {
-				const parsed = parseSSELine(line, currentEventType);
+				const parsed = parseSSELine(line, state);
 				if (!parsed || parsed.data === "[DONE]") continue;
 
 				try {
 					const obj = JSON.parse(parsed.data);
-					updateStreamState(
-						stream,
-						toolCallIndex,
-						parsed.type,
-						obj,
-						searchPhase,
-						indexerPhase,
-					);
+					updateStreamState(stream, state, parsed.type, obj);
 					emit(parsed.type, JSON.stringify(obj));
 				} catch {
 					log.debug("SSE parse error");
@@ -255,9 +252,7 @@ async function consumeStream(
 	scheduleCleanup(stream.conversationId);
 }
 
-function createEmitter(
-	stream: ActiveStream,
-): (event: string, data: string) => void {
+function createEmitter(stream: ActiveStream): SSEEmitter {
 	return (event, data) => {
 		stream.events.push({ event, data });
 		for (const cb of stream.subscribers) {
@@ -313,7 +308,7 @@ export interface SubscribeHandle {
 	delivered: Promise<void>;
 }
 
-function createEventQueue(cb: Subscriber, onDrained: () => void) {
+function createEventQueue(cb: SSEEmitter, onDrained: () => void) {
 	const queue: BufferedEvent[] = [];
 	let draining = false;
 	let active = true;
@@ -350,7 +345,7 @@ function createEventQueue(cb: Subscriber, onDrained: () => void) {
 
 export function subscribe(
 	conversationId: string,
-	cb: Subscriber,
+	cb: SSEEmitter,
 ): SubscribeHandle | null {
 	const stream = activeStreams.get(conversationId);
 	if (!stream) return null;

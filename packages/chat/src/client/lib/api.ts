@@ -2,6 +2,30 @@ import type { WillowGraph } from "./graph-types.js";
 
 const BASE_URL = "/api";
 
+async function fetchJson<T>(path: string): Promise<T> {
+	const res = await fetch(`${BASE_URL}${path}`);
+	return res.json();
+}
+
+async function postJson<T>(
+	path: string,
+	body?: unknown,
+	{ checkOk = false }: { checkOk?: boolean } = {},
+): Promise<T> {
+	const res = await fetch(`${BASE_URL}${path}`, {
+		method: "POST",
+		...(body !== undefined && {
+			headers: { "Content-Type": "application/json" },
+			body: JSON.stringify(body),
+		}),
+	});
+	if (checkOk && !res.ok) {
+		const err = await res.json();
+		throw new Error(err.error || "Request failed");
+	}
+	return res.json();
+}
+
 export interface Conversation {
 	id: string;
 	title: string;
@@ -34,36 +58,7 @@ export interface ToolCallData {
 	phase?: "search" | "chat" | "indexer";
 }
 
-export async function fetchConversations(): Promise<Conversation[]> {
-	const res = await fetch(`${BASE_URL}/chat/conversations`);
-	return res.json();
-}
-
-export async function createConversation(): Promise<Conversation> {
-	const res = await fetch(`${BASE_URL}/chat/conversations`, { method: "POST" });
-	return res.json();
-}
-
-export async function deleteConversation(id: string): Promise<void> {
-	await fetch(`${BASE_URL}/chat/conversations/${id}`, { method: "DELETE" });
-}
-
-export async function fetchMessages(
-	conversationId: string,
-): Promise<Message[]> {
-	const res = await fetch(
-		`${BASE_URL}/chat/conversations/${conversationId}/messages`,
-	);
-	return res.json();
-}
-
-export interface MaintenanceToolCall {
-	toolCallId: string;
-	toolName: string;
-	args: Record<string, unknown>;
-	result?: string;
-	isError?: boolean;
-}
+export type MaintenanceToolCall = Omit<ToolCallData, "phase">;
 
 export interface MaintenanceProgress {
 	phase: "pre-scan" | "crawling" | "resolving" | "committing" | "done";
@@ -91,16 +86,32 @@ export interface MaintenanceStatus {
 	threshold: number;
 }
 
-export async function fetchMaintenanceStatus(): Promise<MaintenanceStatus> {
-	const res = await fetch(`${BASE_URL}/chat/maintenance/status`);
-	return res.json();
+// --- Chat API ---
+
+export function fetchConversations(): Promise<Conversation[]> {
+	return fetchJson("/chat/conversations");
 }
 
-export async function triggerMaintenance(): Promise<{ jobId: string }> {
-	const res = await fetch(`${BASE_URL}/chat/maintenance/run`, {
-		method: "POST",
-	});
-	return res.json();
+export function createConversation(): Promise<Conversation> {
+	return postJson("/chat/conversations");
+}
+
+export async function deleteConversation(id: string): Promise<void> {
+	await fetch(`${BASE_URL}/chat/conversations/${id}`, { method: "DELETE" });
+}
+
+export function fetchMessages(conversationId: string): Promise<Message[]> {
+	return fetchJson(`/chat/conversations/${conversationId}/messages`);
+}
+
+// --- Maintenance API ---
+
+export function fetchMaintenanceStatus(): Promise<MaintenanceStatus> {
+	return fetchJson("/chat/maintenance/status");
+}
+
+export function triggerMaintenance(): Promise<{ jobId: string }> {
+	return postJson("/chat/maintenance/run");
 }
 
 // --- Resource types ---
@@ -119,9 +130,10 @@ export interface Resource {
 	updatedAt: string;
 }
 
-export async function fetchResources(): Promise<Resource[]> {
-	const res = await fetch(`${BASE_URL}/resources`);
-	return res.json();
+// --- Resource API ---
+
+export function fetchResources(): Promise<Resource[]> {
+	return fetchJson("/resources");
 }
 
 export async function uploadResource(file: File): Promise<Resource> {
@@ -138,28 +150,18 @@ export async function uploadResource(file: File): Promise<Resource> {
 	return res.json();
 }
 
-export async function createUrlResource(url: string): Promise<Resource> {
-	const res = await fetch(`${BASE_URL}/resources/url`, {
-		method: "POST",
-		headers: { "Content-Type": "application/json" },
-		body: JSON.stringify({ url }),
-	});
-	if (!res.ok) {
-		const err = await res.json();
-		throw new Error(err.error || "URL fetch failed");
-	}
-	return res.json();
+export function createUrlResource(url: string): Promise<Resource> {
+	return postJson("/resources/url", { url }, { checkOk: true });
 }
 
 export async function deleteResource(id: string): Promise<void> {
 	await fetch(`${BASE_URL}/resources/${id}`, { method: "DELETE" });
 }
 
-export async function fetchResourceContent(
+export function fetchResourceContent(
 	id: string,
 ): Promise<{ text: string | null }> {
-	const res = await fetch(`${BASE_URL}/resources/${id}/content`);
-	return res.json();
+	return fetchJson(`/resources/${id}/content`);
 }
 
 export async function indexResourceStream(
@@ -254,58 +256,46 @@ export interface BranchInfo {
 	isCurrent: boolean;
 }
 
-// --- VCS API functions ---
+// --- VCS API ---
 
 export interface GraphStatus {
 	headHash: string | null;
 	hasLocalChanges: boolean;
 }
 
-export async function fetchGraphStatus(): Promise<GraphStatus> {
-	const res = await fetch(`${BASE_URL}/graph/status`);
-	return res.json();
+export function fetchGraphStatus(): Promise<GraphStatus> {
+	return fetchJson("/graph/status");
 }
 
-export async function fetchCommitLog(limit = 50): Promise<CommitEntry[]> {
-	const res = await fetch(`${BASE_URL}/graph/log?limit=${limit}`);
-	return res.json();
+export function fetchCommitLog(limit = 50): Promise<CommitEntry[]> {
+	return fetchJson(`/graph/log?limit=${limit}`);
 }
 
-export async function fetchCommitDetail(hash: string): Promise<CommitDetail> {
-	const res = await fetch(`${BASE_URL}/graph/commits/${hash}`);
-	return res.json();
+export function fetchCommitDetail(hash: string): Promise<CommitDetail> {
+	return fetchJson(`/graph/commits/${hash}`);
 }
 
-export async function fetchBranches(): Promise<BranchInfo[]> {
-	const res = await fetch(`${BASE_URL}/graph/branches`);
-	return res.json();
+export function fetchBranches(): Promise<BranchInfo[]> {
+	return fetchJson("/graph/branches");
 }
 
-export async function restoreToCommit(
+export function restoreToCommit(
 	hash: string,
 ): Promise<{ ok: boolean; hash: string }> {
-	const res = await fetch(`${BASE_URL}/graph/restore`, {
-		method: "POST",
-		headers: { "Content-Type": "application/json" },
-		body: JSON.stringify({ hash }),
-	});
-	return res.json();
+	return postJson("/graph/restore", { hash });
 }
 
-export async function fetchGraphAtCommit(hash: string): Promise<WillowGraph> {
-	const res = await fetch(`${BASE_URL}/graph/at/${hash}`);
-	return res.json();
+export function fetchGraphAtCommit(hash: string): Promise<WillowGraph> {
+	return fetchJson(`/graph/at/${hash}`);
 }
 
-export async function fetchLocalDiff(): Promise<ChangeSummary> {
-	const res = await fetch(`${BASE_URL}/graph/status/diff`);
-	return res.json();
+export function fetchLocalDiff(): Promise<ChangeSummary> {
+	return fetchJson("/graph/status/diff");
 }
 
-export async function diffCommits(
+export function diffCommits(
 	from: string,
 	to: string,
 ): Promise<ChangeSummary> {
-	const res = await fetch(`${BASE_URL}/graph/diff?from=${from}&to=${to}`);
-	return res.json();
+	return fetchJson(`/graph/diff?from=${from}&to=${to}`);
 }

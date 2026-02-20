@@ -1,4 +1,8 @@
-import type { GraphEdge, GraphNode } from "../../../lib/graph-types.js";
+import type {
+	GraphEdge,
+	GraphNode,
+	WillowGraph,
+} from "../../../lib/graph-types.js";
 
 export interface AnimationPhase {
 	activeNodeIds: string[];
@@ -19,4 +23,17 @@ export interface SearchLayer {
 	nodeIds: Set<string>;
 	focusNodeIds: string[];
 	status: "pending" | "animating" | "settled";
+}
+
+export interface SearchToolCall {
+	toolCallId: string;
+	toolName: string;
+	args: Record<string, unknown>;
+	result?: unknown;
+	isError?: boolean;
+}
+
+export async function fetchGraph(): Promise<WillowGraph> {
+	const res = await fetch("/api/graph");
+	return res.json();
 }

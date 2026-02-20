@@ -10,6 +10,18 @@ pub struct NodeChangeSummary {
     pub path: Vec<String>,
 }
 
+impl NodeChangeSummary {
+    fn new(node: &crate::model::Node, old_content: Option<String>, path: Vec<String>) -> Self {
+        Self {
+            node_id: node.id.0.clone(),
+            node_type: node.node_type.as_str().to_string(),
+            content: node.content.clone(),
+            old_content,
+            path,
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct LinkChangeSummary {
     pub link_id: String,
@@ -18,6 +30,19 @@ pub struct LinkChangeSummary {
     pub relation: String,
     pub bidirectional: bool,
     pub confidence: Option<String>,
+}
+
+impl LinkChangeSummary {
+    fn from_link(id: &crate::model::LinkId, link: &crate::model::Link) -> Self {
+        Self {
+            link_id: id.0.clone(),
+            from_node: link.from_node.0.clone(),
+            to_node: link.to_node.0.clone(),
+            relation: link.relation.clone(),
+            bidirectional: link.bidirectional,
+            confidence: link.confidence.as_ref().map(|c| c.as_str().to_string()),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Default)]
@@ -53,26 +78,14 @@ pub fn compute_graph_diff(old: &Graph, new: &Graph) -> ChangeSummary {
     // Nodes created (in new but not old)
     for (nid, node) in &new.nodes {
         if !old.nodes.contains_key(nid) {
-            summary.nodes_created.push(NodeChangeSummary {
-                node_id: nid.0.clone(),
-                node_type: node.node_type.as_str().to_string(),
-                content: node.content.clone(),
-                old_content: None,
-                path: build_node_path(new, nid),
-            });
+            summary.nodes_created.push(NodeChangeSummary::new(node, None, build_node_path(new, nid)));
         }
     }
 
     // Nodes deleted (in old but not new)
     for (nid, node) in &old.nodes {
         if !new.nodes.contains_key(nid) {
-            summary.nodes_deleted.push(NodeChangeSummary {
-                node_id: nid.0.clone(),
-                node_type: node.node_type.as_str().to_string(),
-                content: node.content.clone(),
-                old_content: None,
-                path: build_node_path(old, nid),
-            });
+            summary.nodes_deleted.push(NodeChangeSummary::new(node, None, build_node_path(old, nid)));
         }
     }
 
@@ -80,13 +93,11 @@ pub fn compute_graph_diff(old: &Graph, new: &Graph) -> ChangeSummary {
     for (nid, new_node) in &new.nodes {
         if let Some(old_node) = old.nodes.get(nid) {
             if old_node.content != new_node.content || old_node.metadata != new_node.metadata {
-                summary.nodes_updated.push(NodeChangeSummary {
-                    node_id: nid.0.clone(),
-                    node_type: new_node.node_type.as_str().to_string(),
-                    content: new_node.content.clone(),
-                    old_content: Some(old_node.content.clone()),
-                    path: build_node_path(new, nid),
-                });
+                summary.nodes_updated.push(NodeChangeSummary::new(
+                    new_node,
+                    Some(old_node.content.clone()),
+                    build_node_path(new, nid),
+                ));
             }
         }
     }
@@ -94,28 +105,14 @@ pub fn compute_graph_diff(old: &Graph, new: &Graph) -> ChangeSummary {
     // Links created
     for (lid, link) in &new.links {
         if !old.links.contains_key(lid) {
-            summary.links_created.push(LinkChangeSummary {
-                link_id: lid.0.clone(),
-                from_node: link.from_node.0.clone(),
-                to_node: link.to_node.0.clone(),
-                relation: link.relation.clone(),
-                bidirectional: link.bidirectional,
-                confidence: link.confidence.as_ref().map(|c| c.as_str().to_string()),
-            });
+            summary.links_created.push(LinkChangeSummary::from_link(lid, link));
         }
     }
 
     // Links removed
     for (lid, link) in &old.links {
         if !new.links.contains_key(lid) {
-            summary.links_removed.push(LinkChangeSummary {
-                link_id: lid.0.clone(),
-                from_node: link.from_node.0.clone(),
-                to_node: link.to_node.0.clone(),
-                relation: link.relation.clone(),
-                bidirectional: link.bidirectional,
-                confidence: link.confidence.as_ref().map(|c| c.as_str().to_string()),
-            });
+            summary.links_removed.push(LinkChangeSummary::from_link(lid, link));
         }
     }
 
@@ -126,14 +123,7 @@ pub fn compute_graph_diff(old: &Graph, new: &Graph) -> ChangeSummary {
                 || old_link.bidirectional != new_link.bidirectional
                 || old_link.confidence != new_link.confidence
             {
-                summary.links_updated.push(LinkChangeSummary {
-                    link_id: lid.0.clone(),
-                    from_node: new_link.from_node.0.clone(),
-                    to_node: new_link.to_node.0.clone(),
-                    relation: new_link.relation.clone(),
-                    bidirectional: new_link.bidirectional,
-                    confidence: new_link.confidence.as_ref().map(|c| c.as_str().to_string()),
-                });
+                summary.links_updated.push(LinkChangeSummary::from_link(lid, new_link));
             }
         }
     }

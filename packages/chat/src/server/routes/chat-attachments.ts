@@ -3,12 +3,11 @@ import { existsSync } from "node:fs";
 import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { extname, join } from "node:path";
-import { PrismaClient } from "@prisma/client";
 import { Hono } from "hono";
 import { createLogger } from "../logger.js";
+import { db } from "./db.js";
 
 const log = createLogger("attachments");
-const db = new PrismaClient();
 
 const ATTACHMENTS_DIR = join(homedir(), ".willow", "chat-attachments");
 

@@ -49,31 +49,16 @@ pub fn search_nodes(graph: &Graph, query: &str, max_results: usize) -> Vec<Searc
 }
 
 fn score_node(node: &Node, query_lower: &str, terms: &[&str], depth: usize) -> Option<SearchResult> {
-    let mut best_score = 0.0_f64;
-    let mut best_field = String::new();
+    let meta_candidates = node.metadata.iter()
+        .map(|(k, v)| (score_text(v, query_lower, terms) * 0.5, format!("metadata.{}", k)));
 
-    // Score against content (weight 1.0)
-    let content_score = score_text(&node.content, query_lower, terms);
-    if content_score > best_score {
-        best_score = content_score;
-        best_field = "content".to_string();
-    }
-
-    // Score against metadata values (weight 0.5)
-    for (key, value) in &node.metadata {
-        let meta_score = score_text(value, query_lower, terms) * 0.5;
-        if meta_score > best_score {
-            best_score = meta_score;
-            best_field = format!("metadata.{}", key);
-        }
-    }
-
-    // Score against node_type string (weight 0.3)
-    let type_score = score_text(node.node_type.as_str(), query_lower, terms) * 0.3;
-    if type_score > best_score {
-        best_score = type_score;
-        best_field = "node_type".to_string();
-    }
+    let (best_score, best_field) = [
+        (score_text(&node.content, query_lower, terms), "content".to_string()),
+        (score_text(node.node_type.as_str(), query_lower, terms) * 0.3, "node_type".to_string()),
+    ]
+    .into_iter()
+    .chain(meta_candidates)
+    .max_by(|a, b| a.0.partial_cmp(&b.0).unwrap_or(std::cmp::Ordering::Equal))?;
 
     if best_score > 0.0 {
         Some(SearchResult {

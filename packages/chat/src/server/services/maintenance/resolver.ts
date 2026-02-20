@@ -118,43 +118,35 @@ export async function spawnResolver(options: {
 		return { actionsExecuted: 0 };
 	}
 
-	if (needsSplitPasses(options.preScanFindings, options.crawlerReports)) {
-		log.info("Split pass mode — too many findings", { totalFindings });
-
-		// Pass 1: Fix critical + warning
-		const fixResult = await runResolverPass({
-			userPrompt: buildFixPassPrompt(
-				options.preScanFindings,
-				options.crawlerReports,
-			),
-			mcpServerPath: options.mcpServerPath,
-			maxTurns: 25,
-			onAction: options.onAction,
-		});
-
-		// Pass 2: Enhancement suggestions
-		const enhancementResult = await runResolverPass({
-			userPrompt: buildEnhancementPassPrompt(options.crawlerReports),
-			mcpServerPath: options.mcpServerPath,
-			maxTurns: 25,
-			onAction: options.onAction,
-		});
-
-		return {
-			actionsExecuted: fixResult.actionsExecuted + enhancementResult.actionsExecuted,
-		};
-	}
-
-	// Single pass
-	const userPrompt = buildResolverUserPrompt(
+	const prompts = needsSplitPasses(
 		options.preScanFindings,
 		options.crawlerReports,
-	);
+	)
+		? [
+				buildFixPassPrompt(options.preScanFindings, options.crawlerReports),
+				buildEnhancementPassPrompt(options.crawlerReports),
+			]
+		: [
+				buildResolverUserPrompt(
+					options.preScanFindings,
+					options.crawlerReports,
+				),
+			];
 
-	return runResolverPass({
-		userPrompt,
-		mcpServerPath: options.mcpServerPath,
-		maxTurns: 25,
-		onAction: options.onAction,
-	});
+	if (prompts.length > 1) {
+		log.info("Split pass mode — too many findings", { totalFindings });
+	}
+
+	let actionsExecuted = 0;
+	for (const userPrompt of prompts) {
+		const result = await runResolverPass({
+			userPrompt,
+			mcpServerPath: options.mcpServerPath,
+			maxTurns: 25,
+			onAction: options.onAction,
+		});
+		actionsExecuted += result.actionsExecuted;
+	}
+
+	return { actionsExecuted };
 }

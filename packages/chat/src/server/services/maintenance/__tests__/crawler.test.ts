@@ -1,5 +1,5 @@
 import { type Mock, beforeEach, describe, expect, it, vi } from "vitest";
-import type { CrawlerReport } from "../types.js";
+import type { CrawlerReport, Finding } from "../types.js";
 
 // Mock cli-chat before importing crawler
 vi.mock("../../cli-chat.js", async (importOriginal) => {
@@ -29,13 +29,11 @@ import { spawnCrawler, spawnCrawlers } from "../crawler.js";
 
 function createMockProc(textToEmit?: string) {
 	const listeners: Record<string, ((...args: unknown[]) => void)[]> = {};
-	const proc = {
+	return {
 		stdout: {
 			on: vi.fn((event: string, handler: (data: Buffer) => void) => {
-				if (event === "data" && textToEmit) {
-					// Emit data on next tick
+				if (event === "data" && textToEmit)
 					setTimeout(() => handler(Buffer.from(textToEmit)), 5);
-				}
 			}),
 		},
 		stderr: { on: vi.fn() },
@@ -47,8 +45,22 @@ function createMockProc(textToEmit?: string) {
 		}),
 		kill: vi.fn(),
 	};
-	return proc;
 }
+
+const defaultCrawlerOpts = {
+	subtreeRootId: "cat1",
+	subtreeContent: "Category 1",
+	crawlerIndex: 1,
+	mcpServerPath: "/mcp",
+	graphSummary: "Summary",
+	preScanFindings: [] as Finding[],
+};
+
+const defaultCrawlersOpts = {
+	mcpServerPath: "/mcp",
+	graphSummary: "Summary",
+	preScanFindings: [] as Finding[],
+};
 
 describe("crawler", () => {
 	beforeEach(() => {
@@ -60,14 +72,7 @@ describe("crawler", () => {
 			throw new Error("spawn failed");
 		});
 
-		const report = await spawnCrawler({
-			subtreeRootId: "cat1",
-			subtreeContent: "Category 1",
-			crawlerIndex: 1,
-			mcpServerPath: "/mcp",
-			graphSummary: "Summary",
-			preScanFindings: [],
-		});
+		const report = await spawnCrawler(defaultCrawlerOpts);
 
 		expect(report.subtreeRoot).toBe("cat1");
 		expect(report.findings).toHaveLength(0);
@@ -75,17 +80,9 @@ describe("crawler", () => {
 	});
 
 	it("spawns CLI with correct args", async () => {
-		const proc = createMockProc();
-		(spawnCli as Mock).mockReturnValue(proc);
+		(spawnCli as Mock).mockReturnValue(createMockProc());
 
-		await spawnCrawler({
-			subtreeRootId: "cat1",
-			subtreeContent: "Category 1",
-			crawlerIndex: 1,
-			mcpServerPath: "/mcp",
-			graphSummary: "Summary",
-			preScanFindings: [],
-		});
+		await spawnCrawler(defaultCrawlerOpts);
 
 		expect(spawnCli).toHaveBeenCalledTimes(1);
 		const args = (spawnCli as Mock).mock.calls[0][0] as string[];
@@ -96,28 +93,20 @@ describe("crawler", () => {
 
 	describe("spawnCrawlers", () => {
 		it("caps at 8 crawlers by combining small subtrees", async () => {
-			const proc = createMockProc();
-			(spawnCli as Mock).mockReturnValue(proc);
+			(spawnCli as Mock).mockReturnValue(createMockProc());
 
 			const subtrees = Array.from({ length: 12 }, (_, i) => ({
 				id: `cat${i}`,
 				content: `Category ${i}`,
 			}));
 
-			await spawnCrawlers({
-				subtrees,
-				mcpServerPath: "/mcp",
-				graphSummary: "Summary",
-				preScanFindings: [],
-			});
+			await spawnCrawlers({ ...defaultCrawlersOpts, subtrees });
 
-			// Should cap at 8 crawlers
 			expect(spawnCli).toHaveBeenCalledTimes(8);
 		});
 
 		it("spawns one crawler per subtree when under limit", async () => {
-			const proc = createMockProc();
-			(spawnCli as Mock).mockReturnValue(proc);
+			(spawnCli as Mock).mockReturnValue(createMockProc());
 
 			const subtrees = [
 				{ id: "cat1", content: "Cat 1" },
@@ -125,12 +114,7 @@ describe("crawler", () => {
 				{ id: "cat3", content: "Cat 3" },
 			];
 
-			const reports = await spawnCrawlers({
-				subtrees,
-				mcpServerPath: "/mcp",
-				graphSummary: "Summary",
-				preScanFindings: [],
-			});
+			const reports = await spawnCrawlers({ ...defaultCrawlersOpts, subtrees });
 
 			expect(spawnCli).toHaveBeenCalledTimes(3);
 			expect(reports).toHaveLength(3);

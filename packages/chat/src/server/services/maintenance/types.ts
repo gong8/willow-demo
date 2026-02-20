@@ -42,11 +42,17 @@ export interface CrawlerReport {
 	findings: Finding[];
 }
 
+export interface GraphStats {
+	nodeCount: number;
+	linkCount: number;
+	categoryCount: number;
+}
+
 export interface MaintenanceReport {
 	preScanFindings: Finding[];
 	crawlerReports: CrawlerReport[];
 	resolverActions: number;
-	graphStats: { nodeCount: number; linkCount: number; categoryCount: number };
+	graphStats: GraphStats;
 	durationMs: number;
 }
 

@@ -1,5 +1,6 @@
 import { CircleDot, GitCommit, GitCompare } from "lucide-react";
-import type { CommitEntry } from "../../lib/api.js";
+import type { CommitEntry } from "../../lib/api";
+import { DEFAULT_COLOR, SOURCE_COLORS } from "./sourceColors";
 
 function relativeTime(timestamp: string): string {
 	const now = Date.now();
@@ -15,13 +16,73 @@ function relativeTime(timestamp: string): string {
 	return `${days}d ago`;
 }
 
-const SOURCE_COLORS: Record<string, string> = {
-	conversation: "bg-blue-500/15 text-blue-400",
-	maintenance: "bg-amber-500/15 text-amber-400",
-	manual: "bg-green-500/15 text-green-400",
-	merge: "bg-purple-500/15 text-purple-400",
-	restore: "bg-rose-500/15 text-rose-400",
-};
+function CommitRow({
+	commit,
+	isSelected,
+	isHead,
+	isCompareSelected,
+	onSelect,
+	onCompareSelect,
+}: {
+	commit: CommitEntry;
+	isSelected: boolean;
+	isHead: boolean;
+	isCompareSelected: boolean;
+	onSelect: (hash: string) => void;
+	onCompareSelect?: (hash: string) => void;
+}) {
+	const colorClass = (SOURCE_COLORS[commit.source] ?? DEFAULT_COLOR).bg;
+
+	return (
+		<button
+			key={commit.hash}
+			type="button"
+			onClick={(e) => {
+				if (e.shiftKey && onCompareSelect) {
+					onCompareSelect(commit.hash);
+				} else {
+					onSelect(commit.hash);
+				}
+			}}
+			className={`flex w-full flex-col gap-1 border-b border-border px-4 py-3 text-left transition-colors ${
+				isCompareSelected
+					? "bg-blue-500/10 ring-1 ring-inset ring-blue-500/30"
+					: isSelected
+						? "bg-accent"
+						: "hover:bg-accent/50"
+			}`}
+		>
+			<div className="flex items-center gap-2">
+				<GitCommit
+					className={`h-3.5 w-3.5 shrink-0 ${
+						isHead ? "text-foreground" : "text-muted-foreground"
+					}`}
+				/>
+				<span className="font-mono text-xs text-muted-foreground">
+					{commit.hash.slice(0, 7)}
+				</span>
+				{isHead && (
+					<span className="rounded bg-emerald-500/15 px-1.5 py-0.5 text-[10px] font-medium text-emerald-400">
+						current
+					</span>
+				)}
+				<span className="ml-auto text-xs text-muted-foreground">
+					{relativeTime(commit.timestamp)}
+				</span>
+			</div>
+			<p className="truncate pl-5.5 text-sm text-foreground">
+				{commit.message}
+			</p>
+			<div className="pl-5.5">
+				<span
+					className={`inline-block rounded px-1.5 py-0.5 text-[10px] font-medium ${colorClass}`}
+				>
+					{commit.source}
+				</span>
+			</div>
+		</button>
+	);
+}
 
 export function CommitLog({
 	commits,
@@ -57,7 +118,6 @@ export function CommitLog({
 
 	return (
 		<div className="flex h-full w-80 flex-col border-r border-border">
-			{/* Compare bar */}
 			{onCompareSelect && (
 				<div className="flex items-center gap-2 border-b border-border px-4 py-2">
 					<GitCompare className="h-3.5 w-3.5 text-muted-foreground" />
@@ -79,7 +139,6 @@ export function CommitLog({
 			)}
 
 			<div className="flex-1 overflow-y-auto">
-				{/* Local changes indicator */}
 				{hasLocalChanges && (
 					<button
 						type="button"
@@ -102,63 +161,17 @@ export function CommitLog({
 					</button>
 				)}
 
-				{commits.map((commit) => {
-					const isSelected = commit.hash === selectedHash;
-					const isHead = commit.hash === headHash;
-					const isCompareSelected = compareSelections.includes(commit.hash);
-					const colorClass =
-						SOURCE_COLORS[commit.source] ?? "bg-muted text-muted-foreground";
-
-					return (
-						<button
-							key={commit.hash}
-							type="button"
-							onClick={(e) => {
-								if (e.shiftKey && onCompareSelect) {
-									onCompareSelect(commit.hash);
-								} else {
-									onSelect(commit.hash);
-								}
-							}}
-							className={`flex w-full flex-col gap-1 border-b border-border px-4 py-3 text-left transition-colors ${
-								isCompareSelected
-									? "bg-blue-500/10 ring-1 ring-inset ring-blue-500/30"
-									: isSelected
-										? "bg-accent"
-										: "hover:bg-accent/50"
-							}`}
-						>
-							<div className="flex items-center gap-2">
-								<GitCommit
-									className={`h-3.5 w-3.5 shrink-0 ${
-										isHead ? "text-foreground" : "text-muted-foreground"
-									}`}
-								/>
-								<span className="font-mono text-xs text-muted-foreground">
-									{commit.hash.slice(0, 7)}
-								</span>
-								{isHead && (
-									<span className="rounded bg-emerald-500/15 px-1.5 py-0.5 text-[10px] font-medium text-emerald-400">
-										current
-									</span>
-								)}
-								<span className="ml-auto text-xs text-muted-foreground">
-									{relativeTime(commit.timestamp)}
-								</span>
-							</div>
-							<p className="truncate pl-5.5 text-sm text-foreground">
-								{commit.message}
-							</p>
-							<div className="pl-5.5">
-								<span
-									className={`inline-block rounded px-1.5 py-0.5 text-[10px] font-medium ${colorClass}`}
-								>
-									{commit.source}
-								</span>
-							</div>
-						</button>
-					);
-				})}
+				{commits.map((commit) => (
+					<CommitRow
+						key={commit.hash}
+						commit={commit}
+						isSelected={commit.hash === selectedHash}
+						isHead={commit.hash === headHash}
+						isCompareSelected={compareSelections.includes(commit.hash)}
+						onSelect={onSelect}
+						onCompareSelect={onCompareSelect}
+					/>
+				))}
 			</div>
 		</div>
 	);

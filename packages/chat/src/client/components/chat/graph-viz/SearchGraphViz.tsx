@@ -1,16 +1,9 @@
 import { MiniGraphCanvas } from "./MiniGraphCanvas.js";
+import type { SearchToolCall } from "./types.js";
 import {
 	type WalkStep,
 	useCumulativeSearchGraph,
 } from "./useCumulativeSearchGraph.js";
-
-interface SearchToolCall {
-	toolCallId: string;
-	toolName: string;
-	args: Record<string, unknown>;
-	result?: unknown;
-	isError?: boolean;
-}
 
 function formatStepLabel(step: WalkStep): string {
 	if (step.action === "start") return "Root";

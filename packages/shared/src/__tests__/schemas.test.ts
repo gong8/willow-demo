@@ -15,14 +15,15 @@ describe("schemas", () => {
 		});
 
 		it("rejects invalid nodeType", () => {
-			const input = {
-				parentId: "root",
-				nodeType: "invalid_type",
-				content: "Test",
-			};
-			expect(() => schemas.createNode.parse(input)).toThrow(/Invalid enum value/);
+			expect(() =>
+				schemas.createNode.parse({
+					parentId: "root",
+					nodeType: "invalid_type",
+					content: "Test",
+				}),
+			).toThrow(/Invalid enum value/);
 		});
-		
+
 		it("allows minimal valid input", () => {
 			const input = {
 				parentId: "root",
@@ -34,28 +35,26 @@ describe("schemas", () => {
 	});
 
 	describe("updateNodeSchema", () => {
-		it("validates valid input", () => {
-			const input = {
-				nodeId: "node-123",
-				content: "Updated content",
-				reason: "Test update",
-			};
-			expect(schemas.updateNode.parse(input)).toEqual(input);
-		});
-
-		it("allows optional fields", () => {
-			const input = { nodeId: "node-123" };
+		it.each([
+			[
+				"full input",
+				{
+					nodeId: "node-123",
+					content: "Updated content",
+					reason: "Test update",
+				},
+			],
+			["minimal input", { nodeId: "node-123" }],
+		])("validates %s", (_, input) => {
 			expect(schemas.updateNode.parse(input)).toEqual(input);
 		});
 	});
 
 	describe("addLinkSchema", () => {
+		const baseLinkInput = { fromNode: "node-A", toNode: "node-B" };
+
 		it("validates valid input", () => {
-			const input = {
-				fromNode: "node-A",
-				toNode: "node-B",
-				relation: "related_to",
-			};
+			const input = { ...baseLinkInput, relation: "related_to" };
 			expect(schemas.addLink.parse(input)).toEqual({
 				...input,
 				bidirectional: false,
@@ -63,23 +62,19 @@ describe("schemas", () => {
 		});
 
 		it("rejects non-canonical relation", () => {
-			const input = {
-				fromNode: "node-A",
-				toNode: "node-B",
-				relation: "will_apply_domain_knowledge",
-			};
-			expect(() => schemas.addLink.parse(input)).toThrow(/Invalid enum value/);
+			expect(() =>
+				schemas.addLink.parse({
+					...baseLinkInput,
+					relation: "will_apply_domain_knowledge",
+				}),
+			).toThrow(/Invalid enum value/);
 		});
 
 		it("accepts all canonical relations", () => {
 			for (const relation of CANONICAL_RELATIONS) {
-				const input = {
-					fromNode: "node-A",
-					toNode: "node-B",
+				expect(schemas.addLink.parse({ ...baseLinkInput, relation })).toEqual({
+					...baseLinkInput,
 					relation,
-				};
-				expect(schemas.addLink.parse(input)).toEqual({
-					...input,
 					bidirectional: false,
 				});
 			}
@@ -87,35 +82,37 @@ describe("schemas", () => {
 	});
 
 	describe("searchNodesSchema", () => {
-		it("validates valid input with default maxResults", () => {
-			const input = { query: "test query" };
-			expect(schemas.searchNodes.parse(input)).toEqual({
+		it("applies default maxResults", () => {
+			expect(schemas.searchNodes.parse({ query: "test query" })).toEqual({
 				query: "test query",
 				maxResults: 10,
 			});
 		});
 
-		it("validates input with explicit maxResults", () => {
+		it("accepts explicit maxResults", () => {
 			const input = { query: "test query", maxResults: 20 };
 			expect(schemas.searchNodes.parse(input)).toEqual(input);
 		});
 
-		it("rejects maxResults out of bounds", () => {
-			expect(() => schemas.searchNodes.parse({ query: "q", maxResults: 0 })).toThrow(/greater than or equal to 1/);
-			expect(() => schemas.searchNodes.parse({ query: "q", maxResults: 100 })).toThrow(/less than or equal to 50/);
+		it.each([
+			[0, /greater than or equal to 1/],
+			[100, /less than or equal to 50/],
+		])("rejects maxResults=%i", (maxResults, pattern) => {
+			expect(() =>
+				schemas.searchNodes.parse({ query: "q", maxResults }),
+			).toThrow(pattern);
 		});
 	});
 
 	describe("getContextSchema", () => {
-		it("validates valid input with default depth", () => {
-			const input = { nodeId: "node-123" };
-			expect(schemas.getContext.parse(input)).toEqual({
+		it("applies default depth", () => {
+			expect(schemas.getContext.parse({ nodeId: "node-123" })).toEqual({
 				nodeId: "node-123",
 				depth: 2,
 			});
 		});
 
-		it("validates input with explicit depth", () => {
+		it("accepts explicit depth", () => {
 			const input = { nodeId: "node-123", depth: 5 };
 			expect(schemas.getContext.parse(input)).toEqual(input);
 		});
@@ -123,8 +120,9 @@ describe("schemas", () => {
 
 	describe("deleteNodeSchema", () => {
 		it("validates valid input", () => {
-			const input = { nodeId: "node-123" };
-			expect(schemas.deleteNode.parse(input)).toEqual(input);
+			expect(schemas.deleteNode.parse({ nodeId: "node-123" })).toEqual({
+				nodeId: "node-123",
+			});
 		});
 	});
 });

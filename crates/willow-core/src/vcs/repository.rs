@@ -88,6 +88,51 @@ impl Repository {
         graph_dir.join("repo").exists()
     }
 
+    // ---- Internal helpers ----
+
+    fn head_hash(&self) -> Result<CommitHash, WillowError> {
+        self.store
+            .resolve_head()?
+            .ok_or(WillowError::VcsNotInitialized)
+    }
+
+    fn advance_head(&self, hash: &CommitHash) -> Result<(), WillowError> {
+        match self.store.read_head()? {
+            HeadState::Branch(name) => self.store.write_branch_ref(&name, hash),
+            HeadState::Detached(_) => self.store.write_head(&HeadState::Detached(hash.clone())),
+        }
+    }
+
+    fn write_snapshot_commit(
+        &self,
+        parents: Vec<CommitHash>,
+        message: String,
+        source: CommitSource,
+        graph: &Graph,
+    ) -> Result<CommitHash, WillowError> {
+        let commit_data = CommitData {
+            parents,
+            message,
+            timestamp: Utc::now(),
+            source,
+            storage_type: CommitStorageType::Snapshot,
+            depth_since_snapshot: 0,
+        };
+        let hash = ObjectStore::hash_commit(&commit_data);
+        self.store.write_commit(&hash, &commit_data)?;
+        self.store.write_snapshot(&hash, graph)?;
+        Ok(hash)
+    }
+
+    fn read_parents(&self, h: &CommitHash) -> Vec<CommitHash> {
+        self.store
+            .read_commit(h)
+            .map(|d| d.parents)
+            .unwrap_or_default()
+    }
+
+    // ---- Commit operations ----
+
     /// Create a commit from pending changes. Returns the new commit hash.
     pub fn create_commit(
         &self,
@@ -99,14 +144,9 @@ impl Repository {
             return Err(WillowError::NothingToCommit);
         }
 
-        let head_hash = self
-            .store
-            .resolve_head()?
-            .ok_or(WillowError::VcsNotInitialized)?;
-
+        let head_hash = self.head_hash()?;
         let parent_data = self.store.read_commit(&head_hash)?;
         let depth = parent_data.depth_since_snapshot + 1;
-
         let is_snapshot = depth >= self.config.snapshot_interval;
 
         let storage_type = if is_snapshot {
@@ -116,7 +156,7 @@ impl Repository {
         };
 
         let commit_data = CommitData {
-            parents: vec![head_hash.clone()],
+            parents: vec![head_hash],
             message: input.message.clone(),
             timestamp: Utc::now(),
             source: input.source.clone(),
@@ -131,39 +171,28 @@ impl Repository {
         if is_snapshot {
             self.store.write_snapshot(&hash, current_graph)?;
         } else {
-            let delta = Delta {
-                changes: pending_changes.to_vec(),
-            };
-            self.store.write_delta(&hash, &delta)?;
+            self.store.write_delta(
+                &hash,
+                &Delta {
+                    changes: pending_changes.to_vec(),
+                },
+            )?;
         }
 
-        // Update branch ref
-        let head_state = self.store.read_head()?;
-        match head_state {
-            HeadState::Branch(name) => {
-                self.store.write_branch_ref(&name, &hash)?;
-            }
-            HeadState::Detached(_) => {
-                self.store.write_head(&HeadState::Detached(hash.clone()))?;
-            }
-        }
-
+        self.advance_head(&hash)?;
         Ok(hash)
     }
 
     /// Reconstruct graph at a specific commit by finding nearest snapshot and replaying deltas.
     pub fn reconstruct_at(&self, target_hash: &CommitHash) -> Result<Graph, WillowError> {
-        // Walk back through parents to find nearest snapshot
         let mut chain: Vec<CommitHash> = Vec::new();
         let mut current = target_hash.clone();
 
         loop {
             let data = self.store.read_commit(&current)?;
             if data.storage_type == CommitStorageType::Snapshot {
-                // Found snapshot, reconstruct from here
                 let mut graph = self.store.read_snapshot(&current)?;
                 debug!(target = %target_hash.0, chain_len = chain.len(), "reconstructing graph");
-                // Replay deltas forward
                 for hash in chain.iter().rev() {
                     let delta = self.store.read_delta(hash)?;
                     apply_delta(&mut graph, &delta);
@@ -182,10 +211,8 @@ impl Repository {
 
     /// Get commit log (most recent first).
     pub fn log(&self, limit: Option<usize>) -> Result<Vec<CommitEntry>, WillowError> {
-        let head = self.store.resolve_head()?;
-        let head = match head {
-            Some(h) => h,
-            None => return Ok(Vec::new()),
+        let Some(head) = self.store.resolve_head()? else {
+            return Ok(Vec::new());
         };
 
         let max = limit.unwrap_or(50);
@@ -198,10 +225,7 @@ impl Repository {
             }
             let data = self.store.read_commit(&hash)?;
             let parent = data.parents.first().cloned();
-            entries.push(CommitEntry {
-                hash,
-                data,
-            });
+            entries.push(CommitEntry { hash, data });
             current = parent;
         }
 
@@ -209,14 +233,16 @@ impl Repository {
     }
 
     /// Show diff for a specific commit (compare with parent).
-    pub fn show_commit(&self, hash: &CommitHash) -> Result<(CommitData, ChangeSummary), WillowError> {
+    pub fn show_commit(
+        &self,
+        hash: &CommitHash,
+    ) -> Result<(CommitData, ChangeSummary), WillowError> {
         let data = self.store.read_commit(hash)?;
 
         let current_graph = self.reconstruct_at(hash)?;
         let parent_graph = if let Some(parent_hash) = data.parents.first() {
             self.reconstruct_at(parent_hash)?
         } else {
-            // Initial commit — diff against empty graph
             Graph {
                 root_id: current_graph.root_id.clone(),
                 nodes: std::collections::HashMap::new(),
@@ -247,11 +273,7 @@ impl Repository {
         input: &CommitInput,
         current_graph: &Graph,
     ) -> Result<Option<CommitHash>, WillowError> {
-        let head_hash = self
-            .store
-            .resolve_head()?
-            .ok_or(WillowError::VcsNotInitialized)?;
-
+        let head_hash = self.head_hash()?;
         let committed_graph = self.reconstruct_at(&head_hash)?;
         let diff = compute_graph_diff(&committed_graph, current_graph);
 
@@ -265,28 +287,13 @@ impl Repository {
             return Ok(None);
         }
 
-        // Force a snapshot commit so we don't need detailed Change objects
-        let commit_data = CommitData {
-            parents: vec![head_hash],
-            message: input.message.clone(),
-            timestamp: Utc::now(),
-            source: input.source.clone(),
-            storage_type: CommitStorageType::Snapshot,
-            depth_since_snapshot: 0,
-        };
-
-        let hash = ObjectStore::hash_commit(&commit_data);
-        self.store.write_commit(&hash, &commit_data)?;
-        self.store.write_snapshot(&hash, current_graph)?;
-
-        let head_state = self.store.read_head()?;
-        match head_state {
-            HeadState::Branch(name) => self.store.write_branch_ref(&name, &hash)?,
-            HeadState::Detached(_) => {
-                self.store.write_head(&HeadState::Detached(hash.clone()))?
-            }
-        }
-
+        let hash = self.write_snapshot_commit(
+            vec![head_hash],
+            input.message.clone(),
+            input.source.clone(),
+            current_graph,
+        )?;
+        self.advance_head(&hash)?;
         Ok(Some(hash))
     }
 
@@ -325,11 +332,7 @@ impl Repository {
             return Err(WillowError::BranchAlreadyExists(name.to_string()));
         }
 
-        let head = self
-            .store
-            .resolve_head()?
-            .ok_or(WillowError::VcsNotInitialized)?;
-
+        let head = self.head_hash()?;
         self.store.write_branch_ref(name, &head)?;
         Ok(())
     }
@@ -351,7 +354,8 @@ impl Repository {
             .ok_or_else(|| WillowError::BranchNotFound(name.to_string()))?;
 
         let graph = self.reconstruct_at(&branch_hash)?;
-        self.store.write_head(&HeadState::Branch(name.to_string()))?;
+        self.store
+            .write_head(&HeadState::Branch(name.to_string()))?;
 
         Ok(graph)
     }
@@ -386,9 +390,7 @@ impl Repository {
             return Err(WillowError::HasPendingChanges);
         }
 
-        // Verify commit exists
         self.store.read_commit(hash)?;
-
         let graph = self.reconstruct_at(hash)?;
         self.store.write_head(&HeadState::Detached(hash.clone()))?;
 
@@ -402,39 +404,17 @@ impl Repository {
         _current_graph: &Graph,
     ) -> Result<(CommitHash, Graph), WillowError> {
         let target_graph = self.reconstruct_at(hash)?;
+        let head_hash = self.head_hash()?;
 
-        // Build a synthetic set of changes
-        // For simplicity, we store this as a snapshot commit
-        let head_hash = self
-            .store
-            .resolve_head()?
-            .ok_or(WillowError::VcsNotInitialized)?;
-
-        let commit_data = CommitData {
-            parents: vec![head_hash],
-            message: format!("Restore to {}", &hash.0[..8.min(hash.0.len())]),
-            timestamp: Utc::now(),
-            source: CommitSource::Manual {
+        let new_hash = self.write_snapshot_commit(
+            vec![head_hash],
+            format!("Restore to {}", &hash.0[..8.min(hash.0.len())]),
+            CommitSource::Manual {
                 tool_name: Some("restore".to_string()),
             },
-            storage_type: CommitStorageType::Snapshot,
-            depth_since_snapshot: 0,
-        };
-
-        let new_hash = ObjectStore::hash_commit(&commit_data);
-        self.store.write_commit(&new_hash, &commit_data)?;
-        self.store.write_snapshot(&new_hash, &target_graph)?;
-
-        // Update branch ref
-        match self.store.read_head()? {
-            HeadState::Branch(name) => {
-                self.store.write_branch_ref(&name, &new_hash)?;
-            }
-            HeadState::Detached(_) => {
-                self.store
-                    .write_head(&HeadState::Detached(new_hash.clone()))?;
-            }
-        }
+            &target_graph,
+        )?;
+        self.advance_head(&new_hash)?;
 
         Ok((new_hash, target_graph))
     }
@@ -457,28 +437,17 @@ impl Repository {
             .read_branch_ref(source_branch)?
             .ok_or_else(|| WillowError::BranchNotFound(source_branch.to_string()))?;
 
-        let target_hash = self
-            .store
-            .resolve_head()?
-            .ok_or(WillowError::VcsNotInitialized)?;
+        let target_hash = self.head_hash()?;
 
-        // Fast-forward check: if target is ancestor of source
-        let read_parents = |h: &CommitHash| -> Vec<CommitHash> {
-            self.store
-                .read_commit(h)
-                .map(|d| d.parents)
-                .unwrap_or_default()
-        };
+        let read_parents = |h: &CommitHash| self.read_parents(h);
 
         if is_ancestor(&target_hash, &source_hash, &read_parents) {
-            // Fast-forward: just move the branch pointer
             self.store
                 .write_branch_ref(&current_branch_name, &source_hash)?;
             let graph = self.reconstruct_at(&source_hash)?;
             return Ok(MergeBranchResult::Success(source_hash, graph));
         }
 
-        // Find merge base
         let merge_base_hash = find_merge_base(&target_hash, &source_hash, &read_parents)
             .ok_or_else(|| {
                 WillowError::VcsCommitNotFound("No common ancestor found".to_string())
@@ -489,38 +458,27 @@ impl Repository {
 
         match three_way_merge(&base_graph, current_graph, &theirs_graph) {
             MergeResult::Success(merged_graph) => {
-                // Create merge commit
-                let commit_data = CommitData {
-                    parents: vec![target_hash, source_hash],
-                    message: format!("Merge '{}' into '{}'", source_branch, current_branch_name),
-                    timestamp: Utc::now(),
-                    source: CommitSource::Merge {
+                let hash = self.write_snapshot_commit(
+                    vec![target_hash, source_hash],
+                    format!("Merge '{}' into '{}'", source_branch, current_branch_name),
+                    CommitSource::Merge {
                         source_branch: source_branch.to_string(),
                         target_branch: current_branch_name.clone(),
                     },
-                    storage_type: CommitStorageType::Snapshot,
-                    depth_since_snapshot: 0,
-                };
-
-                let hash = ObjectStore::hash_commit(&commit_data);
-                self.store.write_commit(&hash, &commit_data)?;
-                self.store.write_snapshot(&hash, &merged_graph)?;
+                    &merged_graph,
+                )?;
                 self.store
                     .write_branch_ref(&current_branch_name, &hash)?;
-
                 Ok(MergeBranchResult::Success(hash, merged_graph))
             }
             MergeResult::FastForward(hash) => {
-                // Shouldn't happen here since we handled it above
                 let graph = self.reconstruct_at(&hash)?;
                 Ok(MergeBranchResult::Success(hash, graph))
             }
-            MergeResult::Conflicts(conflicts) => {
-                Ok(MergeBranchResult::Conflicts {
-                    conflicts,
-                    source_branch: source_branch.to_string(),
-                })
-            }
+            MergeResult::Conflicts(conflicts) => Ok(MergeBranchResult::Conflicts {
+                conflicts,
+                source_branch: source_branch.to_string(),
+            }),
         }
     }
 
@@ -540,34 +498,23 @@ impl Repository {
             .read_branch_ref(source_branch)?
             .ok_or_else(|| WillowError::BranchNotFound(source_branch.to_string()))?;
 
-        let target_hash = self
-            .store
-            .resolve_head()?
-            .ok_or(WillowError::VcsNotInitialized)?;
+        let target_hash = self.head_hash()?;
 
-        // Apply resolutions to current graph
         let mut resolved_graph = current_graph.clone();
         apply_resolutions(&mut resolved_graph, resolutions);
 
-        // Create merge commit
-        let commit_data = CommitData {
-            parents: vec![target_hash, source_hash],
-            message: format!(
+        let hash = self.write_snapshot_commit(
+            vec![target_hash, source_hash],
+            format!(
                 "Merge '{}' into '{}' (conflicts resolved)",
                 source_branch, current_branch_name
             ),
-            timestamp: Utc::now(),
-            source: CommitSource::Merge {
+            CommitSource::Merge {
                 source_branch: source_branch.to_string(),
                 target_branch: current_branch_name.clone(),
             },
-            storage_type: CommitStorageType::Snapshot,
-            depth_since_snapshot: 0,
-        };
-
-        let hash = ObjectStore::hash_commit(&commit_data);
-        self.store.write_commit(&hash, &commit_data)?;
-        self.store.write_snapshot(&hash, &resolved_graph)?;
+            &resolved_graph,
+        )?;
         self.store
             .write_branch_ref(&current_branch_name, &hash)?;
 

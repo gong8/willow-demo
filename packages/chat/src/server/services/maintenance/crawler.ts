@@ -97,6 +97,35 @@ RULES:
 - Valid severities: critical, warning, suggestion`;
 }
 
+function emptyReport(
+	subtreeRootId: string,
+	subtreeContent: string,
+): CrawlerReport {
+	return {
+		subtreeRoot: subtreeRootId,
+		subtreeContent,
+		nodesExplored: 0,
+		findings: [],
+	};
+}
+
+function parseFinding(
+	f: Record<string, unknown>,
+	subtreeRootId: string,
+): Finding {
+	return {
+		id: (f.id as string) ?? "C?-???",
+		category: (f.category as Finding["category"]) ?? "enhancement",
+		severity: (f.severity as Finding["severity"]) ?? "suggestion",
+		source: `crawler:${subtreeRootId}`,
+		title: (f.title as string) ?? "",
+		description: (f.description as string) ?? "",
+		nodeIds: Array.isArray(f.nodeIds) ? f.nodeIds : [],
+		linkIds: Array.isArray(f.linkIds) ? f.linkIds : [],
+		suggestedAction: f.suggestedAction as string | undefined,
+	};
+}
+
 function parseCrawlerReport(
 	textOutput: string,
 	subtreeRootId: string,
@@ -109,12 +138,7 @@ function parseCrawlerReport(
 		log.warn("No <crawler_report> found in crawler output", {
 			subtreeRootId,
 		});
-		return {
-			subtreeRoot: subtreeRootId,
-			subtreeContent,
-			nodesExplored: 0,
-			findings: [],
-		};
+		return emptyReport(subtreeRootId, subtreeContent);
 	}
 
 	try {
@@ -124,19 +148,8 @@ function parseCrawlerReport(
 			subtreeContent: parsed.subtreeContent ?? subtreeContent,
 			nodesExplored: parsed.nodesExplored ?? 0,
 			findings: Array.isArray(parsed.findings)
-				? parsed.findings.map(
-						(f: Record<string, unknown>) =>
-							({
-								id: f.id ?? "C?-???",
-								category: f.category ?? "enhancement",
-								severity: f.severity ?? "suggestion",
-								source: `crawler:${subtreeRootId}`,
-								title: f.title ?? "",
-								description: f.description ?? "",
-								nodeIds: Array.isArray(f.nodeIds) ? f.nodeIds : [],
-								linkIds: Array.isArray(f.linkIds) ? f.linkIds : [],
-								suggestedAction: f.suggestedAction,
-							}) as Finding,
+				? parsed.findings.map((f: Record<string, unknown>) =>
+						parseFinding(f, subtreeRootId),
 					)
 				: [],
 		};
@@ -145,12 +158,7 @@ function parseCrawlerReport(
 			subtreeRootId,
 			error: (e as Error).message,
 		});
-		return {
-			subtreeRoot: subtreeRootId,
-			subtreeContent,
-			nodesExplored: 0,
-			findings: [],
-		};
+		return emptyReport(subtreeRootId, subtreeContent);
 	}
 }
 
@@ -215,12 +223,7 @@ export function spawnCrawler(
 				subtreeRootId: options.subtreeRootId,
 			});
 			cleanupDir(invocationDir);
-			resolve({
-				subtreeRoot: options.subtreeRootId,
-				subtreeContent: options.subtreeContent,
-				nodesExplored: 0,
-				findings: [],
-			});
+			resolve(emptyReport(options.subtreeRootId, options.subtreeContent));
 			return;
 		}
 

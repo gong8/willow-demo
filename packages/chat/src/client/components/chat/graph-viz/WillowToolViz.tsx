@@ -7,13 +7,8 @@ import type {
 } from "../../../lib/graph-types.js";
 import { MiniGraphCanvas } from "./MiniGraphCanvas.js";
 import { extractSubgraph } from "./subgraph-extractors.js";
-import type { SubgraphData } from "./types.js";
+import { type SubgraphData, fetchGraph } from "./types.js";
 import { useGraphAnimation } from "./useGraphAnimation.js";
-
-async function fetchGraph(): Promise<WillowGraph> {
-	const res = await fetch("/api/graph");
-	return res.json();
-}
 
 const DIMMED_NODE_COLOR = "#d1d5db";
 const DIMMED_EDGE_COLOR = "#e5e7eb";

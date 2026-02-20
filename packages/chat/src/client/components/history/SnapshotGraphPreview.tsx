@@ -1,10 +1,11 @@
 import { useQuery } from "@tanstack/react-query";
-import { useCallback, useMemo, useState } from "react";
+import { useMemo } from "react";
 import { GraphCanvas } from "reagraph";
 import { fetchGraphAtCommit } from "../../lib/api.js";
 import { transformGraphData } from "../../lib/graph-transform.js";
 import type { NodeType, WillowGraph } from "../../lib/graph-types.js";
 import { NodeDetailPanel } from "../graph/NodeDetailPanel.js";
+import { useGraphSelection } from "./useGraphSelection.js";
 
 const ALL_TYPES = new Set<NodeType>([
 	"root",
@@ -23,18 +24,8 @@ export function SnapshotGraphPreview({ hash }: { hash: string }) {
 		staleTime: Number.POSITIVE_INFINITY,
 	});
 
-	const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
-	const [selections, setSelections] = useState<string[]>([]);
-
-	const handleNodeClick = useCallback((node: { id: string }) => {
-		setSelectedNodeId(node.id);
-		setSelections([node.id]);
-	}, []);
-
-	const handleCanvasClick = useCallback(() => {
-		setSelectedNodeId(null);
-		setSelections([]);
-	}, []);
+	const { selectedNodeId, selections, handleNodeClick, handleCanvasClick } =
+		useGraphSelection();
 
 	const { nodes, edges, stats } = useMemo(() => {
 		if (!graph) {
