@@ -235,12 +235,6 @@ export function ReconnectStreamView({ stream }: { stream: ReconnectStream }) {
 						allDone={searchDone}
 					/>
 				)}
-				{hasIndexerPhase && (
-					<ReconnectIndexerIndicator
-						toolCalls={indexerCalls}
-						allDone={indexerDone}
-					/>
-				)}
 				<div className="prose prose-sm max-w-none rounded-2xl bg-muted px-4 py-2">
 					{stream.thinkingText && (
 						<ReasoningDisplay type="reasoning" text={stream.thinkingText} />
@@ -276,6 +270,12 @@ export function ReconnectStreamView({ stream }: { stream: ReconnectStream }) {
 						</ReactMarkdown>
 					)}
 				</div>
+				{hasIndexerPhase && (
+					<ReconnectIndexerIndicator
+						toolCalls={indexerCalls}
+						allDone={indexerDone}
+					/>
+				)}
 			</div>
 		</div>
 	);

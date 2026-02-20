@@ -192,6 +192,11 @@ export async function fetchGraphAtCommit(hash: string): Promise<WillowGraph> {
 	return res.json();
 }
 
+export async function fetchLocalDiff(): Promise<ChangeSummary> {
+	const res = await fetch(`${BASE_URL}/graph/status/diff`);
+	return res.json();
+}
+
 export async function diffCommits(
 	from: string,
 	to: string,

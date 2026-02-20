@@ -53,9 +53,15 @@ export function IndexerIndicator({ part }: { part: IndexerResultsPart }) {
 		prevLengthRef.current = updateCalls.length;
 	}, [updateCalls.length]);
 
+	// Hide entirely when the indexer made no mutations (nothing to store)
+	if (total === 0 && !isRunning) return null;
+
 	// Clamp index if array shrinks
 	const safeIndex = Math.min(currentIndex, Math.max(0, total - 1));
 	const currentTc = updateCalls[safeIndex];
+
+	// While running but no mutations yet, don't show anything
+	if (total === 0) return null;
 
 	return (
 		<div

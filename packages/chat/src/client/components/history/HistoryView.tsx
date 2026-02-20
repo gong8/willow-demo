@@ -13,10 +13,12 @@ import { CommitDetailPanel } from "./CommitDetailPanel.js";
 import { CommitLog } from "./CommitLog.js";
 import { CompareView } from "./CompareView.js";
 import { HistoryToolbar, type SourceFilter } from "./HistoryToolbar.js";
+import { LocalChangesPanel } from "./LocalChangesPanel.js";
 
 type ViewMode =
 	| { type: "detail"; hash: string }
 	| { type: "compare"; fromHash: string; toHash: string }
+	| { type: "local-changes" }
 	| null;
 
 export function HistoryView() {
@@ -64,6 +66,11 @@ export function HistoryView() {
 
 	const handleSelect = useCallback((hash: string) => {
 		setViewMode({ type: "detail", hash });
+		setCompareSelections([]);
+	}, []);
+
+	const handleSelectLocalChanges = useCallback(() => {
+		setViewMode({ type: "local-changes" });
 		setCompareSelections([]);
 	}, []);
 
@@ -140,7 +147,9 @@ export function HistoryView() {
 						selectedHash={selectedHash}
 						headHash={headHash}
 						hasLocalChanges={hasLocalChanges}
+						showLocalSelected={viewMode?.type === "local-changes"}
 						onSelect={handleSelect}
+						onSelectLocalChanges={handleSelectLocalChanges}
 						compareSelections={compareSelections}
 						onCompareSelect={handleCompareSelect}
 						onCompare={
@@ -154,6 +163,8 @@ export function HistoryView() {
 							toHash={viewMode.toHash}
 							onClose={handleExitCompare}
 						/>
+					) : viewMode?.type === "local-changes" ? (
+						<LocalChangesPanel />
 					) : selectedHash ? (
 						<CommitDetailPanel
 							hash={selectedHash}

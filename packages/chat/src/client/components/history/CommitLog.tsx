@@ -28,7 +28,9 @@ export function CommitLog({
 	selectedHash,
 	headHash,
 	hasLocalChanges,
+	showLocalSelected,
 	onSelect,
+	onSelectLocalChanges,
 	compareSelections = [],
 	onCompareSelect,
 	onCompare,
@@ -37,7 +39,9 @@ export function CommitLog({
 	selectedHash: string | null;
 	headHash: string | null;
 	hasLocalChanges: boolean;
+	showLocalSelected?: boolean;
 	onSelect: (hash: string) => void;
+	onSelectLocalChanges?: () => void;
 	compareSelections?: string[];
 	onCompareSelect?: (hash: string) => void;
 	onCompare?: () => void;
@@ -77,7 +81,15 @@ export function CommitLog({
 			<div className="flex-1 overflow-y-auto">
 				{/* Local changes indicator */}
 				{hasLocalChanges && (
-					<div className="flex w-full flex-col gap-1 border-b border-border bg-amber-500/5 px-4 py-3">
+					<button
+						type="button"
+						onClick={onSelectLocalChanges}
+						className={`flex w-full flex-col gap-1 border-b border-border px-4 py-3 text-left transition-colors ${
+							showLocalSelected
+								? "bg-amber-500/10"
+								: "bg-amber-500/5 hover:bg-amber-500/10"
+						}`}
+					>
 						<div className="flex items-center gap-2">
 							<CircleDot className="h-3.5 w-3.5 shrink-0 text-amber-400" />
 							<span className="text-xs font-medium text-amber-400">
@@ -87,7 +99,7 @@ export function CommitLog({
 						<p className="truncate pl-5.5 text-xs text-muted-foreground">
 							Working graph differs from last commit
 						</p>
-					</div>
+					</button>
 				)}
 
 				{commits.map((commit) => {
