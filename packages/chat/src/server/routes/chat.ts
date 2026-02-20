@@ -49,12 +49,21 @@ Memory updates happen automatically in the background — you don't need to stor
 - Use markdown for formatting
 - Keep responses appropriately sized — short for simple facts, longer for complex discussions
 - Use bullet points for lists of remembered facts
-</formatting>`;
+</formatting>
+
+<web_capabilities>
+You can search the web using WebSearch and fetch web pages using WebFetch when the user asks you to look something up, research a topic, or when real-time information would help. Use these proactively when the user's question benefits from current information.
+</web_capabilities>
+
+<resources>
+The user may have uploaded documents or saved URLs to their Resource Library. When they reference specific documents (e.g., "my resume", "that article"), use search_memories to check if the document has been indexed into the knowledge graph. If they attach a resource directly, its content will be provided below.
+</resources>`;
 
 const streamRequestSchema = z.object({
 	conversationId: z.string(),
 	message: z.string(),
 	attachmentIds: z.array(z.string()).optional(),
+	resourceIds: z.array(z.string()).optional(),
 	expectedPriorCount: z.number().optional(),
 });
 
@@ -148,8 +157,13 @@ chatRoutes.post("/stream", async (c) => {
 		return c.json({ error: parsed.error.flatten() }, 400);
 	}
 
-	const { conversationId, message, attachmentIds, expectedPriorCount } =
-		parsed.data;
+	const {
+		conversationId,
+		message,
+		attachmentIds,
+		resourceIds,
+		expectedPriorCount,
+	} = parsed.data;
 
 	log.info("Stream request", { conversationId, messageLength: message.length });
 
@@ -235,17 +249,48 @@ chatRoutes.post("/stream", async (c) => {
 				.filter((p): p is string => p !== null)
 		: [];
 
+	// Build resource context if resourceIds provided
+	let systemPrompt = CHAT_SYSTEM_PROMPT;
+	if (resourceIds && resourceIds.length > 0) {
+		const resources = await db.resource.findMany({
+			where: {
+				id: { in: resourceIds },
+				status: { in: ["ready", "indexed"] },
+			},
+			select: { id: true, name: true, extractedText: true },
+		});
+		if (resources.length > 0) {
+			const MAX_RESOURCE_TEXT = 30_000;
+			const resourceBlocks = resources
+				.filter(
+					(r): r is typeof r & { extractedText: string } =>
+						r.extractedText != null,
+				)
+				.map((r) => {
+					const text =
+						r.extractedText.length > MAX_RESOURCE_TEXT
+							? `${r.extractedText.slice(0, MAX_RESOURCE_TEXT)}\n[... truncated]`
+							: r.extractedText;
+					return `<resource id="${r.id}" name="${r.name}">\n${text}\n</resource>`;
+				});
+			if (resourceBlocks.length > 0) {
+				systemPrompt += `\n\n<attached_resources>\n${resourceBlocks.join("\n\n")}\n</attached_resources>`;
+			}
+		}
+	}
+
 	const cliStream = createAgenticStream({
 		chatOptions: {
 			messages: history as Array<{
 				role: "system" | "user" | "assistant";
 				content: string;
 			}>,
-			systemPrompt: CHAT_SYSTEM_PROMPT,
+			systemPrompt,
 			mcpServerPath: MCP_SERVER_PATH,
 			images: allImagePaths.length > 0 ? allImagePaths : undefined,
 			newImages: newImagePaths.length > 0 ? newImagePaths : undefined,
 			disallowedTools: getDisallowedTools("chat"),
+			allowWebTools: true,
 		},
 		userMessage: message,
 		mcpServerPath: MCP_SERVER_PATH,

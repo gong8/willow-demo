@@ -417,15 +417,31 @@ export function writeMcpConfig(
 	);
 }
 
-export function writeSystemPrompt(dir: string, content: string): string {
-	const suffix = [
-		"",
-		"IMPORTANT CONSTRAINTS:",
-		"- Only use MCP tools prefixed with mcp__willow__ to manage the knowledge graph.",
-		"- Never attempt to use filesystem, code editing, web browsing, or any non-MCP tools.",
-		"- When you need to perform multiple knowledge graph operations, make all tool calls in parallel within a single response.",
-	].join("\n");
-	return writeTempFile(dir, "system-prompt.txt", content + suffix);
+export function writeSystemPrompt(
+	dir: string,
+	content: string,
+	options?: { allowWebTools?: boolean },
+): string {
+	const constraints = options?.allowWebTools
+		? [
+				"",
+				"IMPORTANT CONSTRAINTS:",
+				"- Only use MCP tools prefixed with mcp__willow__ or mcp__coordinator__ to manage the knowledge graph and search memories.",
+				"- You may use WebSearch and WebFetch to look up information on the web when helpful.",
+				"- When you need to perform multiple knowledge graph operations, make all tool calls in parallel within a single response.",
+			]
+		: [
+				"",
+				"IMPORTANT CONSTRAINTS:",
+				"- Only use MCP tools prefixed with mcp__willow__ to manage the knowledge graph.",
+				"- Never attempt to use filesystem, code editing, web browsing, or any non-MCP tools.",
+				"- When you need to perform multiple knowledge graph operations, make all tool calls in parallel within a single response.",
+			];
+	return writeTempFile(
+		dir,
+		"system-prompt.txt",
+		content + constraints.join("\n"),
+	);
 }
 
 interface CliMessage {
@@ -456,6 +472,8 @@ export interface CliChatOptions {
 	disallowedTools?: string[];
 	/** Coordinator MCP config for sub-agent communication. */
 	coordinator?: CoordinatorConfig;
+	/** Allow WebFetch/WebSearch in system prompt constraints. */
+	allowWebTools?: boolean;
 }
 
 function buildPrompt(messages: CliMessage[], newImages?: string[]): string {
@@ -757,6 +775,7 @@ async function prepareInvocation(options: CliChatOptions): Promise<{
 	const systemPromptPath = writeSystemPrompt(
 		invocationDir,
 		options.systemPrompt,
+		{ allowWebTools: options.allowWebTools },
 	);
 	const model = getCliModel(options.model ?? LLM_MODEL);
 	const hasImages = options.images && options.images.length > 0;

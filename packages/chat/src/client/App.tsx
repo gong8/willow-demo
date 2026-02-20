@@ -9,6 +9,7 @@ import {
 import { ChatThread } from "./components/chat/ChatThread.js";
 import { GraphView } from "./components/graph/GraphView.js";
 import { HistoryView } from "./components/history/HistoryView.js";
+import { ResourcesView } from "./components/resources/ResourcesView.js";
 import { createConversation } from "./lib/api.js";
 
 const queryClient = new QueryClient();
@@ -58,15 +59,14 @@ function ChatApp() {
 			/>
 			<div className="flex min-h-0 flex-1 flex-col">
 				{activeView === "history" && <HistoryView />}
+				{activeView === "resources" && <ResourcesView />}
 				{activeView === "graph" && (
 					<GraphView activeConversationId={activeConversationId} />
 				)}
 				{activeConversationId ? (
 					<div
 						className={
-							activeView === "chat"
-								? "flex min-h-0 flex-1 flex-col"
-								: "hidden"
+							activeView === "chat" ? "flex min-h-0 flex-1 flex-col" : "hidden"
 						}
 					>
 						<ChatThread

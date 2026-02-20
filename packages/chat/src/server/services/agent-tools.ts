@@ -86,12 +86,24 @@ const AGENT_ALLOWED_TOOLS: Record<AgentName, readonly string[]> = {
 	],
 };
 
+/** Built-in tools that the chat agent is allowed to use (web browsing). */
+const CHAT_ALLOWED_BUILTINS = ["WebFetch", "WebSearch"];
+
 /**
  * Returns the full disallowed tools list for an agent:
  * BLOCKED_BUILTIN_TOOLS + any willow tools NOT in the agent's allowlist.
+ * The chat agent additionally gets WebFetch/WebSearch unblocked.
  */
 export function getDisallowedTools(agent: AgentName): string[] {
 	const allowed = new Set(AGENT_ALLOWED_TOOLS[agent]);
 	const blockedWillow = ALL_WILLOW_TOOLS.filter((t) => !allowed.has(t));
-	return [...BLOCKED_BUILTIN_TOOLS, ...blockedWillow];
+
+	let builtinBlocked = BLOCKED_BUILTIN_TOOLS;
+	if (agent === "chat") {
+		builtinBlocked = BLOCKED_BUILTIN_TOOLS.filter(
+			(t) => !CHAT_ALLOWED_BUILTINS.includes(t),
+		);
+	}
+
+	return [...builtinBlocked, ...blockedWillow];
 }

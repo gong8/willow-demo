@@ -41,3 +41,19 @@ model ChatAttachment {
 
   @@index([messageId])
 }
+
+model Resource {
+  id            String   @id @default(cuid())
+  name          String
+  resourceType  String                         // "pdf" | "text" | "markdown" | "url"
+  status        String   @default("pending")   // "pending" | "extracting" | "ready" | "indexing" | "indexed" | "error"
+  sourceUrl     String?
+  diskPath      String?
+  contentType   String?
+  fileSize      Int?
+  extractedText String?
+  errorMessage  String?
+  indexContext   String?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+}

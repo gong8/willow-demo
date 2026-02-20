@@ -103,6 +103,108 @@ export async function triggerMaintenance(): Promise<{ jobId: string }> {
 	return res.json();
 }
 
+// --- Resource types ---
+
+export interface Resource {
+	id: string;
+	name: string;
+	resourceType: "pdf" | "text" | "markdown" | "url";
+	status: "pending" | "extracting" | "ready" | "indexing" | "indexed" | "error";
+	sourceUrl: string | null;
+	contentType: string | null;
+	fileSize: number | null;
+	errorMessage?: string | null;
+	indexContext?: string | null;
+	createdAt: string;
+	updatedAt: string;
+}
+
+export async function fetchResources(): Promise<Resource[]> {
+	const res = await fetch(`${BASE_URL}/resources`);
+	return res.json();
+}
+
+export async function uploadResource(file: File): Promise<Resource> {
+	const formData = new FormData();
+	formData.append("file", file);
+	const res = await fetch(`${BASE_URL}/resources`, {
+		method: "POST",
+		body: formData,
+	});
+	if (!res.ok) {
+		const err = await res.json();
+		throw new Error(err.error || "Upload failed");
+	}
+	return res.json();
+}
+
+export async function createUrlResource(url: string): Promise<Resource> {
+	const res = await fetch(`${BASE_URL}/resources/url`, {
+		method: "POST",
+		headers: { "Content-Type": "application/json" },
+		body: JSON.stringify({ url }),
+	});
+	if (!res.ok) {
+		const err = await res.json();
+		throw new Error(err.error || "URL fetch failed");
+	}
+	return res.json();
+}
+
+export async function deleteResource(id: string): Promise<void> {
+	await fetch(`${BASE_URL}/resources/${id}`, { method: "DELETE" });
+}
+
+export async function fetchResourceContent(
+	id: string,
+): Promise<{ text: string | null }> {
+	const res = await fetch(`${BASE_URL}/resources/${id}/content`);
+	return res.json();
+}
+
+export async function indexResourceStream(
+	id: string,
+	context?: string,
+	onEvent?: (event: string, data: string) => void,
+): Promise<void> {
+	const res = await fetch(`${BASE_URL}/resources/${id}/index`, {
+		method: "POST",
+		headers: { "Content-Type": "application/json" },
+		body: JSON.stringify({ context }),
+	});
+
+	if (!res.ok) {
+		const err = await res.json();
+		throw new Error(err.error || "Indexing failed");
+	}
+
+	const reader = res.body?.getReader();
+	if (!reader) return;
+
+	const decoder = new TextDecoder();
+	let buffer = "";
+
+	while (true) {
+		const { done, value } = await reader.read();
+		if (done) break;
+
+		buffer += decoder.decode(value, { stream: true });
+		const lines = buffer.split("\n");
+		buffer = lines.pop() || "";
+
+		let currentEvent = "message";
+		for (const line of lines) {
+			if (line.startsWith("event: ")) {
+				currentEvent = line.slice(7);
+			} else if (line.startsWith("data: ")) {
+				const data = line.slice(6);
+				onEvent?.(currentEvent, data);
+				if (currentEvent === "done") return;
+			}
+		}
+	}
+}
+
 // --- VCS types ---
 
 export interface CommitEntry {

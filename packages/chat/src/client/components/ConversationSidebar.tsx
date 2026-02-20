@@ -1,5 +1,12 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { History, MessageSquare, Network, Plus, Trash2 } from "lucide-react";
+import {
+	FolderOpen,
+	History,
+	MessageSquare,
+	Network,
+	Plus,
+	Trash2,
+} from "lucide-react";
 import {
 	type Conversation,
 	createConversation,
@@ -7,7 +14,7 @@ import {
 	fetchConversations,
 } from "../lib/api.js";
 
-export type ActiveView = "chat" | "graph" | "history";
+export type ActiveView = "chat" | "graph" | "history" | "resources";
 
 export function ConversationSidebar({
 	activeId,
@@ -95,6 +102,18 @@ export function ConversationSidebar({
 						title="Version history"
 					>
 						<History className="h-4 w-4" />
+					</button>
+					<button
+						type="button"
+						onClick={() => onViewChange("resources")}
+						className={`rounded-md p-1.5 transition-colors ${
+							activeView === "resources"
+								? "bg-accent text-accent-foreground"
+								: "text-muted-foreground hover:bg-accent hover:text-foreground"
+						}`}
+						title="Resources"
+					>
+						<FolderOpen className="h-4 w-4" />
 					</button>
 					<button
 						type="button"

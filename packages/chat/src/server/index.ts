@@ -5,6 +5,7 @@ import { createLogger } from "./logger.js";
 import { attachmentRoutes } from "./routes/chat-attachments.js";
 import { chatRoutes } from "./routes/chat.js";
 import { graphRoutes } from "./routes/graph.js";
+import { resourceRoutes } from "./routes/resources.js";
 
 const log = createLogger("server");
 
@@ -14,6 +15,7 @@ app.use("*", cors());
 app.route("/chat", chatRoutes);
 app.route("/chat/attachments", attachmentRoutes);
 app.route("/graph", graphRoutes);
+app.route("/resources", resourceRoutes);
 app.get("/", (c) => c.json({ name: "willow-api", version: "0.1.0" }));
 
 const port = Number(process.env.PORT) || 8787;
