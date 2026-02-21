@@ -78,14 +78,22 @@ describe("mcp-server index", () => {
 			query: "test",
 			maxResults: 5,
 		});
-		expect(mockStore.searchNodes).toHaveBeenCalledWith("test", 5);
+		expect(mockStore.searchNodes).toHaveBeenCalledWith(
+			"test",
+			5,
+			undefined,
+		);
 		expect(res.content[0].text).toContain("result1");
 	});
 
 	it("search_nodes uses default maxResults", async () => {
 		mockStore.searchNodes.mockReturnValue([]);
 		await registeredTools.search_nodes({ query: "test" });
-		expect(mockStore.searchNodes).toHaveBeenCalledWith("test", 10);
+		expect(mockStore.searchNodes).toHaveBeenCalledWith(
+			"test",
+			10,
+			undefined,
+		);
 	});
 
 	it.each([

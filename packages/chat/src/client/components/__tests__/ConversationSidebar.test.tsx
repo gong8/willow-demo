@@ -23,6 +23,7 @@ describe("ConversationSidebar", () => {
 			{
 				id: "c1",
 				title: "Conv 1",
+				scopeNodeId: null,
 				messageCount: 5,
 				createdAt: new Date().toISOString(),
 				updatedAt: new Date().toISOString(),
@@ -30,6 +31,7 @@ describe("ConversationSidebar", () => {
 			{
 				id: "c2",
 				title: "Conv 2",
+				scopeNodeId: null,
 				messageCount: 1,
 				createdAt: new Date().toISOString(),
 				updatedAt: new Date().toISOString(),

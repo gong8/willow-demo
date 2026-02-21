@@ -374,10 +374,11 @@ impl JsGraphStore {
         &self,
         query: String,
         max_results: Option<u32>,
+        root_node_id: Option<String>,
     ) -> Vec<JsSearchResult> {
         debug!(query = %query, "search_nodes");
         map_vec(
-            &self.inner.search_nodes(&query, max_results.map(|n| n as usize)),
+            &self.inner.search_nodes(&query, max_results.map(|n| n as usize), root_node_id.as_deref()),
             search_result_to_js,
         )
     }

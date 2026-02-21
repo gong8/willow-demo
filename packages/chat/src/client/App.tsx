@@ -9,6 +9,7 @@ import {
 	type ActiveView,
 	ConversationSidebar,
 } from "./components/ConversationSidebar.js";
+import { ScopePickerDialog } from "./components/ScopePickerDialog.js";
 import { ChatThread } from "./components/chat/ChatThread.js";
 import { GraphView } from "./components/graph/GraphView.js";
 import { HistoryView } from "./components/history/HistoryView.js";
@@ -44,12 +45,22 @@ function ChatApp() {
 		string | null
 	>(null);
 	const [activeView, setActiveView] = useState<ActiveView>("chat");
+	const [showScopePicker, setShowScopePicker] = useState(false);
 
-	const handleNew = useCallback(async () => {
-		const conv = await createConversation();
-		qc.invalidateQueries({ queryKey: ["conversations"] });
-		setActiveConversationId(conv.id);
-	}, [qc]);
+	const handleNew = useCallback(() => {
+		setShowScopePicker(true);
+	}, []);
+
+	const handleCreateWithScope = useCallback(
+		async (scopeNodeId: string | null) => {
+			setShowScopePicker(false);
+			const conv = await createConversation(scopeNodeId);
+			qc.invalidateQueries({ queryKey: ["conversations"] });
+			setActiveConversationId(conv.id);
+			setActiveView("chat");
+		},
+		[qc],
+	);
 
 	return (
 		<div className="flex h-screen bg-background text-foreground">
@@ -81,6 +92,12 @@ function ChatApp() {
 					activeView === "chat" && <EmptyState onNew={handleNew} />
 				)}
 			</div>
+			{showScopePicker && (
+				<ScopePickerDialog
+					onSelect={handleCreateWithScope}
+					onClose={() => setShowScopePicker(false)}
+				/>
+			)}
 		</div>
 	);
 }

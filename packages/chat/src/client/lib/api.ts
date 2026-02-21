@@ -37,6 +37,7 @@ async function deleteReq(path: string): Promise<void> {
 export interface Conversation {
 	id: string;
 	title: string;
+	scopeNodeId: string | null;
 	createdAt: string;
 	updatedAt: string;
 	messageCount: number;
@@ -100,8 +101,24 @@ export function fetchConversations(): Promise<Conversation[]> {
 	return fetchJson("/chat/conversations");
 }
 
-export function createConversation(): Promise<Conversation> {
-	return postJson("/chat/conversations");
+export function createConversation(
+	scopeNodeId?: string | null,
+): Promise<Conversation> {
+	return postJson(
+		"/chat/conversations",
+		scopeNodeId ? { scopeNodeId } : undefined,
+	);
+}
+
+export interface TreeNode {
+	id: string;
+	content: string;
+	nodeType: string;
+	childCount: number;
+}
+
+export function fetchNodeChildren(nodeId: string): Promise<TreeNode[]> {
+	return fetchJson(`/graph/children/${nodeId}`);
 }
 
 export function deleteConversation(id: string): Promise<void> {

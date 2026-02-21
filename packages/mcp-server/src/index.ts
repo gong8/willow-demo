@@ -13,10 +13,51 @@ const log = createLogger("mcp");
 
 const graphPath =
 	process.env.WILLOW_GRAPH_PATH ?? join(homedir(), ".willow", "graph.json");
+const scopeNodeId = process.env.WILLOW_SCOPE_NODE_ID || undefined;
 
 mkdirSync(join(graphPath, ".."), { recursive: true });
 
 const store = JsGraphStore.open(graphPath);
+
+// --- Scope enforcement ---
+
+let scopeNodeIds: Set<string> | null = null;
+
+function collectSubtreeIds(nodeId: string): Set<string> {
+	const ids = new Set<string>();
+	const queue = [nodeId];
+	while (queue.length > 0) {
+		const current = queue.pop() as string;
+		ids.add(current);
+		try {
+			const ctx = store.getContext(current, 1);
+			for (const child of ctx.descendants) {
+				if (child.parentId === current && !ids.has(child.id)) {
+					queue.push(child.id);
+				}
+			}
+		} catch {
+			// Node may not exist
+		}
+	}
+	return ids;
+}
+
+function isInScope(nodeId: string): boolean {
+	if (!scopeNodeId) return true;
+	if (!scopeNodeIds) {
+		scopeNodeIds = collectSubtreeIds(scopeNodeId);
+	}
+	return scopeNodeIds.has(nodeId);
+}
+
+function requireInScope(nodeId: string, label: string): ToolResult | null {
+	if (isInScope(nodeId)) return null;
+	return textResponse(
+		`Error: ${label} "${nodeId}" is outside the current scope. Only nodes within the scoped subtree can be modified.`,
+		true,
+	);
+}
 
 const server = new McpServer({
 	name: "willow",
@@ -62,7 +103,11 @@ registerTool(
 	"Search the knowledge graph for nodes matching a query. Use this to find existing facts before creating new ones.",
 	schemas.searchNodes.shape,
 	({ query, maxResults }) => {
-		const results = store.searchNodes(query, maxResults ?? 10);
+		const results = store.searchNodes(
+			query,
+			maxResults ?? 10,
+			scopeNodeId ?? undefined,
+		);
 		log.debug("search_nodes result", { count: results.length });
 		return jsonResponse(results);
 	},
@@ -79,14 +124,25 @@ registerTool(
 	"create_node",
 	"Create a new node in the knowledge graph. Types: 'category' for top-level grouping, 'collection' for sub-groups, 'entity' for named things, 'attribute' for facts/properties, 'event' for time-bound occurrences, 'detail' for additional depth/elaboration. Always specify a parent node.",
 	schemas.createNode.shape,
-	(input) => jsonResponse(store.createNode(input)),
+	(input) => {
+		const scopeErr = requireInScope(input.parentId, "Parent node");
+		if (scopeErr) return scopeErr;
+		const result = store.createNode(input);
+		// Invalidate scope cache so newly created node is included
+		if (scopeNodeIds) scopeNodeIds.add(result.id);
+		return jsonResponse(result);
+	},
 );
 
 registerTool(
 	"update_node",
 	"Update an existing node's content or metadata. When content changes, the old value is preserved in history with an optional reason.",
 	schemas.updateNode.shape,
-	(input) => jsonResponse(store.updateNode(input)),
+	(input) => {
+		const scopeErr = requireInScope(input.nodeId, "Node");
+		if (scopeErr) return scopeErr;
+		return jsonResponse(store.updateNode(input));
+	},
 );
 
 registerTool(
@@ -94,7 +150,11 @@ registerTool(
 	"Delete a node and all its descendants from the knowledge graph. Cannot delete the root node. Associated links are also removed.",
 	schemas.deleteNode.shape,
 	({ nodeId }) => {
+		const scopeErr = requireInScope(nodeId, "Node");
+		if (scopeErr) return scopeErr;
 		store.deleteNode(nodeId);
+		// Invalidate scope cache after deletion
+		if (scopeNodeIds) scopeNodeIds.delete(nodeId);
 		return textResponse(`Deleted node ${nodeId} and all descendants.`);
 	},
 );
@@ -171,7 +231,7 @@ function handleWalkAction(
 	nodeId?: string,
 	linkId?: string,
 ): ToolResult {
-	if (action === "start") return formatWalkView("root");
+	if (action === "start") return formatWalkView(scopeNodeId ?? "root");
 	if (action === "done") return textResponse("Search complete.");
 
 	if (action === "down") {
@@ -236,7 +296,15 @@ registerTool(
 	"add_link",
 	"Create a link between two nodes. The relation MUST be one of: 'related_to', 'contradicts', 'caused_by', 'leads_to', 'depends_on', 'similar_to', 'part_of', 'example_of', 'derived_from'. Non-canonical values will be rejected. Set bidirectional=true for symmetric relations like 'related_to' and 'similar_to'.",
 	schemas.addLink.shape,
-	(input) => jsonResponse(store.addLink(input)),
+	(input) => {
+		if (scopeNodeId && !isInScope(input.fromNode) && !isInScope(input.toNode)) {
+			return textResponse(
+				"Error: At least one endpoint of the link must be within the current scope.",
+				true,
+			);
+		}
+		return jsonResponse(store.addLink(input));
+	},
 );
 
 registerTool(

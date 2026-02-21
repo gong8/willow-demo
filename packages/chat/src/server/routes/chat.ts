@@ -75,6 +75,7 @@ chatRoutes.get("/conversations", async (c) => {
 		select: {
 			id: true,
 			title: true,
+			scopeNodeId: true,
 			createdAt: true,
 			updatedAt: true,
 			_count: { select: { messages: true } },
@@ -89,11 +90,26 @@ chatRoutes.get("/conversations", async (c) => {
 
 // Create conversation
 chatRoutes.post("/conversations", async (c) => {
+	let scopeNodeId: string | undefined;
+	try {
+		const body = await c.req.json();
+		scopeNodeId = body?.scopeNodeId ?? undefined;
+	} catch {
+		// No body or not JSON — that's fine
+	}
 	const conversation = await db.conversation.create({
-		data: {},
-		select: { id: true, title: true, createdAt: true, updatedAt: true },
+		data: { ...(scopeNodeId ? { scopeNodeId } : {}) },
+		select: {
+			id: true,
+			title: true,
+			scopeNodeId: true,
+			createdAt: true,
+			updatedAt: true,
+		},
 	});
-	log.info("Conversation created");
+	log.info("Conversation created", {
+		scopeNodeId: scopeNodeId ?? "global",
+	});
 	return c.json(conversation, 201);
 });
 
@@ -204,7 +220,10 @@ chatRoutes.post("/stream", async (c) => {
 	});
 
 	const { allImagePaths, newImagePaths } = collectImagePaths(history);
-	const systemPrompt = await buildSystemPrompt(resourceIds);
+	const systemPrompt = await buildSystemPrompt(
+		resourceIds,
+		conversation.scopeNodeId,
+	);
 
 	const cliStream = createAgenticStream({
 		chatOptions: {
@@ -218,10 +237,12 @@ chatRoutes.post("/stream", async (c) => {
 			newImages: newImagePaths.length > 0 ? newImagePaths : undefined,
 			disallowedTools: getDisallowedTools("chat"),
 			allowWebTools: true,
+			scopeNodeId: conversation.scopeNodeId ?? undefined,
 		},
 		userMessage: message,
 		mcpServerPath: MCP_SERVER_PATH,
 		conversationId,
+		scopeNodeId: conversation.scopeNodeId ?? undefined,
 	});
 
 	startStream(conversationId, cliStream, db, () => {
@@ -303,8 +324,13 @@ const MAX_RESOURCE_TEXT = 30_000;
 
 async function buildSystemPrompt(
 	resourceIds: string[] | undefined,
+	scopeNodeId?: string | null,
 ): Promise<string> {
-	if (!resourceIds || resourceIds.length === 0) return CHAT_SYSTEM_PROMPT;
+	let basePrompt = CHAT_SYSTEM_PROMPT;
+	if (scopeNodeId) {
+		basePrompt += `\n\n<scope_context>\nYou are operating within a scoped context, focused on a specific subtree of the knowledge graph (rooted at node "${scopeNodeId}"). Your searches and memory operations are restricted to this subtree. When recalling information, only facts within this scope will be returned.\n</scope_context>`;
+	}
+	if (!resourceIds || resourceIds.length === 0) return basePrompt;
 
 	const resources = await db.resource.findMany({
 		where: {
@@ -326,8 +352,8 @@ async function buildSystemPrompt(
 			return `<resource id="${r.id}" name="${r.name}">\n${text}\n</resource>`;
 		});
 
-	if (resourceBlocks.length === 0) return CHAT_SYSTEM_PROMPT;
-	return `${CHAT_SYSTEM_PROMPT}\n\n<attached_resources>\n${resourceBlocks.join("\n\n")}\n</attached_resources>`;
+	if (resourceBlocks.length === 0) return basePrompt;
+	return `${basePrompt}\n\n<attached_resources>\n${resourceBlocks.join("\n\n")}\n</attached_resources>`;
 }
 
 function pipeStreamToSSE(

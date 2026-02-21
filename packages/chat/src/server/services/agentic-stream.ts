@@ -21,6 +21,8 @@ interface AgenticStreamOptions {
 	mcpServerPath: string;
 	/** Conversation ID for VCS attribution. */
 	conversationId?: string;
+	/** If set, restricts all agents to this subtree of the knowledge graph. */
+	scopeNodeId?: string;
 }
 
 /**
@@ -43,7 +45,13 @@ interface AgenticStreamOptions {
 export function createAgenticStream(
 	options: AgenticStreamOptions,
 ): ReadableStream<Uint8Array> {
-	const { chatOptions, userMessage, mcpServerPath, conversationId } = options;
+	const {
+		chatOptions,
+		userMessage,
+		mcpServerPath,
+		conversationId,
+		scopeNodeId,
+	} = options;
 	const encoder = new TextEncoder();
 
 	return new ReadableStream({
@@ -73,6 +81,7 @@ export function createAgenticStream(
 				await runChatAgent(
 					{
 						...chatOptions,
+						scopeNodeId,
 						coordinator: {
 							eventSocketPath: socket.socketPath,
 							mcpServerPath,
@@ -103,6 +112,7 @@ export function createAgenticStream(
 						mcpServerPath,
 						emitSSE: emit,
 						signal: chatOptions.signal,
+						scopeNodeId,
 					});
 					log.info("Indexer phase complete");
 

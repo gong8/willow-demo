@@ -3,11 +3,12 @@ import {
 	ThreadPrimitive,
 	useLocalRuntime,
 } from "@assistant-ui/react";
-import { useQueryClient } from "@tanstack/react-query";
-import { ChevronDown } from "lucide-react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { ChevronDown, Focus } from "lucide-react";
 import { useEffect, useMemo, useRef } from "react";
 import { useChatHistory } from "../../hooks/useChatHistory.js";
 import { useStreamReconnect } from "../../hooks/useStreamReconnect.js";
+import { type Conversation, fetchConversations } from "../../lib/api.js";
 import {
 	chatAttachmentAdapter,
 	createWillowChatAdapter,
@@ -70,6 +71,14 @@ export function ChatThread({
 		},
 	});
 
+	const { data: conversations = [] } = useQuery<Conversation[]>({
+		queryKey: ["conversations"],
+		queryFn: fetchConversations,
+	});
+	const scopeNodeId = conversations.find(
+		(c) => c.id === conversationId,
+	)?.scopeNodeId;
+
 	const { reconnectStream, reconnectViewportRef } = useStreamReconnect(
 		conversationId,
 		adapterStreamingRef,
@@ -93,6 +102,12 @@ export function ChatThread({
 		<AssistantRuntimeProvider runtime={runtime}>
 			<DraftPersistence conversationId={conversationId} />
 			<div className="flex h-full min-h-0 flex-col">
+				{scopeNodeId && (
+					<div className="flex items-center gap-1.5 border-b border-border bg-primary/5 px-4 py-1.5 text-xs text-primary">
+						<Focus className="h-3 w-3" />
+						<span>Scoped to: {scopeNodeId}</span>
+					</div>
+				)}
 				<ThreadPrimitive.Root className="relative flex min-h-0 flex-1 flex-col overflow-hidden">
 					<ThreadPrimitive.Viewport
 						ref={reconnectViewportRef}

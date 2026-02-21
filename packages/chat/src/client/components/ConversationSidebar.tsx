@@ -1,5 +1,6 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
+	Focus,
 	FolderOpen,
 	History,
 	type LucideIcon,
@@ -115,6 +116,11 @@ export function ConversationSidebar({
 						}`}
 					>
 						<MessageSquare className="h-3.5 w-3.5 shrink-0" />
+						{conv.scopeNodeId && (
+							<span title="Scoped chat">
+								<Focus className="h-3 w-3 shrink-0 text-primary" />
+							</span>
+						)}
 						<span className="flex-1 truncate">{conv.title}</span>
 						<button
 							type="button"

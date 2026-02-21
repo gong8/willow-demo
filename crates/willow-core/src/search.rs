@@ -17,9 +17,10 @@ fn cmp_score(a: &f64, b: &f64) -> std::cmp::Ordering {
     a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal)
 }
 
-/// Search the graph by traversing from the root node via BFS.
+/// Search the graph by traversing from a starting node via BFS.
 /// Only nodes reachable through the tree hierarchy are visited.
-pub fn search_nodes(graph: &Graph, query: &str, max_results: usize) -> Vec<SearchResult> {
+/// When `root_node_id` is provided, the search starts from that node instead of the graph root.
+pub fn search_nodes(graph: &Graph, query: &str, max_results: usize, root_node_id: Option<&NodeId>) -> Vec<SearchResult> {
     let query_lower = query.to_lowercase();
     let terms: Vec<&str> = query_lower.split_whitespace().collect();
 
@@ -27,9 +28,11 @@ pub fn search_nodes(graph: &Graph, query: &str, max_results: usize) -> Vec<Searc
         return Vec::new();
     }
 
+    let start_id = root_node_id.unwrap_or(&graph.root_id);
+
     let mut results: Vec<SearchResult> = Vec::new();
     let mut queue: VecDeque<(&NodeId, usize)> = VecDeque::new();
-    queue.push_back((&graph.root_id, 0));
+    queue.push_back((start_id, 0));
 
     while let Some((node_id, depth)) = queue.pop_front() {
         let node = match graph.nodes.get(node_id) {
@@ -130,7 +133,7 @@ mod tests {
         let mut graph = create_default_graph();
         insert_child_of_root(&mut graph, "n1", "favorite color is blue", NodeType::Detail);
 
-        let results = search_nodes(&graph, "favorite color is blue", 10);
+        let results = search_nodes(&graph, "favorite color is blue", 10, None);
         assert_eq!(results.len(), 1);
         assert!((results[0].score - 1.0).abs() < f64::EPSILON);
     }
@@ -140,7 +143,7 @@ mod tests {
         let mut graph = create_default_graph();
         insert_child_of_root(&mut graph, "n1", "likes pizza and pasta", NodeType::Detail);
 
-        let results = search_nodes(&graph, "pizza sushi", 10);
+        let results = search_nodes(&graph, "pizza sushi", 10, None);
         assert_eq!(results.len(), 1);
         assert!(results[0].score > 0.0);
         assert!(results[0].score < 0.6);
@@ -151,7 +154,7 @@ mod tests {
         let mut graph = create_default_graph();
         insert_child_of_root(&mut graph, "n1", "likes pizza", NodeType::Detail);
 
-        let results = search_nodes(&graph, "quantum mechanics", 10);
+        let results = search_nodes(&graph, "quantum mechanics", 10, None);
         assert!(results.is_empty());
     }
 
@@ -162,7 +165,7 @@ mod tests {
         graph.nodes.get_mut(&node_id).unwrap()
             .metadata.insert("source".to_string(), "conversation about hobbies".to_string());
 
-        let results = search_nodes(&graph, "hobbies", 10);
+        let results = search_nodes(&graph, "hobbies", 10, None);
         assert_eq!(results.len(), 1);
         assert_eq!(results[0].matched_field, "metadata.source");
     }
@@ -179,7 +182,7 @@ mod tests {
             );
         }
 
-        let results = search_nodes(&graph, "item", 5);
+        let results = search_nodes(&graph, "item", 5, None);
         assert_eq!(results.len(), 5);
         for i in 1..results.len() {
             assert!(results[i - 1].score >= results[i].score);
@@ -206,7 +209,7 @@ mod tests {
         };
         graph.nodes.insert(orphan.id.clone(), orphan);
 
-        let results = search_nodes(&graph, "orphan", 10);
+        let results = search_nodes(&graph, "orphan", 10, None);
         assert!(results.is_empty(), "orphan node should not be reachable via BFS from root");
     }
 
@@ -233,8 +236,65 @@ mod tests {
         graph.nodes.insert(detail.id.clone(), detail);
         graph.nodes.get_mut(&cat_id).unwrap().children.push(detail_id);
 
-        let results = search_nodes(&graph, "pizza", 10);
+        let results = search_nodes(&graph, "pizza", 10, None);
         assert_eq!(results.len(), 1);
         assert_eq!(results[0].depth, 2); // root(0) -> cat(1) -> detail(2)
+    }
+
+    #[test]
+    fn test_search_with_root_node_id_scopes_to_subtree() {
+        let mut graph = create_default_graph();
+        let now = Utc::now();
+
+        // Create two top-level categories
+        let edu_id = insert_child_of_root(&mut graph, "edu", "Education", NodeType::Category);
+        let family_id = insert_child_of_root(&mut graph, "family", "Family", NodeType::Category);
+
+        // Add children under each
+        let cs_id = NodeId("cs".to_string());
+        let cs = Node {
+            id: cs_id.clone(),
+            node_type: NodeType::Detail,
+            content: "Computer Science degree".to_string(),
+            parent_id: Some(edu_id.clone()),
+            children: Vec::new(),
+            metadata: HashMap::new(),
+            previous_values: Vec::new(),
+            temporal: None,
+            created_at: now,
+            updated_at: now,
+        };
+        graph.nodes.insert(cs.id.clone(), cs);
+        graph.nodes.get_mut(&edu_id).unwrap().children.push(cs_id);
+
+        let sibling_id = NodeId("sibling".to_string());
+        let sibling = Node {
+            id: sibling_id.clone(),
+            node_type: NodeType::Detail,
+            content: "Has a sister studying Computer Science".to_string(),
+            parent_id: Some(family_id.clone()),
+            children: Vec::new(),
+            metadata: HashMap::new(),
+            previous_values: Vec::new(),
+            temporal: None,
+            created_at: now,
+            updated_at: now,
+        };
+        graph.nodes.insert(sibling.id.clone(), sibling);
+        graph.nodes.get_mut(&family_id).unwrap().children.push(sibling_id);
+
+        // Global search should find both
+        let all_results = search_nodes(&graph, "Computer Science", 10, None);
+        assert_eq!(all_results.len(), 2);
+
+        // Scoped search under Education should only find the CS degree
+        let scoped_results = search_nodes(&graph, "Computer Science", 10, Some(&edu_id));
+        assert_eq!(scoped_results.len(), 1);
+        assert_eq!(scoped_results[0].node_id.0, "cs");
+
+        // Scoped search under Family should only find the sibling
+        let family_results = search_nodes(&graph, "Computer Science", 10, Some(&family_id));
+        assert_eq!(family_results.len(), 1);
+        assert_eq!(family_results[0].node_id.0, "sibling");
     }
 }

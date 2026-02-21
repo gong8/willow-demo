@@ -524,8 +524,10 @@ impl GraphStore {
         &self,
         query: &str,
         max_results: Option<usize>,
+        root_node_id: Option<&str>,
     ) -> Vec<search::SearchResult> {
-        search::search_nodes(&self.graph, query, max_results.unwrap_or(10))
+        let root_nid = root_node_id.map(|id| NodeId(id.to_string()));
+        search::search_nodes(&self.graph, query, max_results.unwrap_or(10), root_nid.as_ref())
     }
 }
 
@@ -737,7 +739,7 @@ mod tests {
             .create_node("root", "detail", "Works at Google", None, None)
             .unwrap();
 
-        let results = store.search_nodes("pizza", None);
+        let results = store.search_nodes("pizza", None, None);
         assert_eq!(results.len(), 1);
         assert!(results[0].content.contains("pizza"));
     }

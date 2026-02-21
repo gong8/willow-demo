@@ -43,20 +43,34 @@ export interface RunIndexerAgentOptions {
 	mcpServerPath: string;
 	emitSSE: SSEEmitter;
 	signal?: AbortSignal;
+	/** If set, restricts the indexer to this subtree of the knowledge graph. */
+	scopeNodeId?: string;
 }
 
 export async function runIndexerAgent(
 	options: RunIndexerAgentOptions,
 ): Promise<void> {
-	const { userMessage, assistantResponse, mcpServerPath, emitSSE, signal } =
-		options;
+	const {
+		userMessage,
+		assistantResponse,
+		mcpServerPath,
+		emitSSE,
+		signal,
+		scopeNodeId,
+	} = options;
+
+	let systemPrompt = INDEXER_SYSTEM_PROMPT;
+	if (scopeNodeId) {
+		systemPrompt += `\n\nSCOPE RESTRICTION: You are operating within a scoped context (subtree rooted at node "${scopeNodeId}"). Only create or update nodes within this subtree. Silently ignore any facts that belong to other parts of the knowledge graph.`;
+	}
 
 	await runAgent({
 		agentName: "indexer",
-		systemPrompt: INDEXER_SYSTEM_PROMPT,
+		systemPrompt,
 		prompt: `<conversation>\nUser: ${userMessage}\nAssistant: ${assistantResponse}\n</conversation>\nAnalyze the above and update the knowledge graph with any new facts about the user.`,
 		mcpServerPath,
 		emitSSE,
 		signal,
+		scopeNodeId,
 	});
 }

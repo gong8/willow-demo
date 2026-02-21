@@ -85,6 +85,27 @@ graphRoutes.get("/", (c) => {
 	}
 });
 
+// GET /children/:nodeId — direct children (for scope picker)
+graphRoutes.get("/children/:nodeId", (c) => {
+	try {
+		const store = getStore();
+		const nodeId = c.req.param("nodeId");
+		const ctx = store.getContext(nodeId, 1);
+		const children = ctx.descendants
+			.filter((n) => n.parentId === nodeId)
+			.map((n) => ({
+				id: n.id,
+				content: n.content,
+				nodeType: n.nodeType,
+				childCount: n.children.length,
+			}));
+		return c.json(children);
+	} catch (e: unknown) {
+		log.error("Failed to get children", { error: (e as Error).message });
+		return c.json({ error: (e as Error).message }, 400);
+	}
+});
+
 graphRoutes.get("/status", (c) => {
 	try {
 		const store = getStore();

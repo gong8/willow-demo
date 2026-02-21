@@ -27,6 +27,8 @@ export interface AgentRunnerOptions {
 	signal?: AbortSignal;
 	/** If provided, captures text output from content events. */
 	captureText?: boolean;
+	/** If set, restricts the agent to this subtree of the knowledge graph. */
+	scopeNodeId?: string;
 }
 
 export interface AgentRunnerResult {
@@ -50,6 +52,7 @@ export function runAgent(
 		maxTurns = "10",
 		signal,
 		captureText = false,
+		scopeNodeId,
 	} = options;
 
 	return new Promise((resolve) => {
@@ -59,7 +62,9 @@ export function runAgent(
 		const prefix = `${agentName}__`;
 
 		const invocationDir = createInvocationDir();
-		const mcpConfigPath = writeMcpConfig(invocationDir, mcpServerPath);
+		const mcpConfigPath = writeMcpConfig(invocationDir, mcpServerPath, {
+			scopeNodeId,
+		});
 		const systemPromptPath = writeSystemPrompt(invocationDir, systemPrompt);
 
 		const args = [

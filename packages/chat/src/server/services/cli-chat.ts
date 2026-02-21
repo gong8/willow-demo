@@ -152,7 +152,11 @@ function nodeStdioServer(scriptPath: string): Record<string, unknown> {
 	return { type: "stdio", command: "node", args: [scriptPath] };
 }
 
-function writeCoordinatorMcp(dir: string, config: CoordinatorConfig): string {
+function writeCoordinatorMcp(
+	dir: string,
+	config: CoordinatorConfig,
+	scopeNodeId?: string,
+): string {
 	const graphPath = getGraphPath();
 
 	const script = `#!/usr/bin/env node
@@ -167,6 +171,7 @@ const crypto = require("crypto");
 const MCP_SERVER_PATH = ${JSON.stringify(config.mcpServerPath)};
 const EVENT_SOCKET_PATH = ${JSON.stringify(config.eventSocketPath)};
 const GRAPH_PATH = ${JSON.stringify(graphPath)};
+const SCOPE_NODE_ID = ${JSON.stringify(scopeNodeId ?? "")};
 
 const SEARCH_SYSTEM_PROMPT = \`You are a memory search agent. Your job is to navigate a knowledge tree to find information relevant to the user's message.
 
@@ -216,9 +221,11 @@ function runSearchAgent(query) {
     fs.mkdirSync(invDir, { recursive: true });
 
     const mcpConfigPath = path.join(invDir, "mcp-config.json");
+    const willowEnv = { WILLOW_GRAPH_PATH: GRAPH_PATH };
+    if (SCOPE_NODE_ID) willowEnv.WILLOW_SCOPE_NODE_ID = SCOPE_NODE_ID;
     fs.writeFileSync(mcpConfigPath, JSON.stringify({
       mcpServers: {
-        willow: { type: "stdio", command: "node", args: [MCP_SERVER_PATH], env: { WILLOW_GRAPH_PATH: GRAPH_PATH } }
+        willow: { type: "stdio", command: "node", args: [MCP_SERVER_PATH], env: willowEnv }
       }
     }));
 
@@ -386,12 +393,19 @@ export function writeMcpConfig(
 	options?: {
 		imagePaths?: string[];
 		coordinator?: CoordinatorConfig;
+		scopeNodeId?: string;
 	},
 ): string {
+	const willowEnv: Record<string, string> = {
+		WILLOW_GRAPH_PATH: getGraphPath(),
+	};
+	if (options?.scopeNodeId) {
+		willowEnv.WILLOW_SCOPE_NODE_ID = options.scopeNodeId;
+	}
 	const servers: Record<string, unknown> = {
 		willow: {
 			...nodeStdioServer(mcpServerPath),
-			env: { WILLOW_GRAPH_PATH: getGraphPath() },
+			env: willowEnv,
 		},
 	};
 
@@ -402,7 +416,7 @@ export function writeMcpConfig(
 	}
 	if (options?.coordinator) {
 		servers.coordinator = nodeStdioServer(
-			writeCoordinatorMcp(dir, options.coordinator),
+			writeCoordinatorMcp(dir, options.coordinator, options?.scopeNodeId),
 		);
 	}
 
@@ -455,6 +469,8 @@ export interface CliChatOptions {
 	coordinator?: CoordinatorConfig;
 	/** Allow WebFetch/WebSearch in system prompt constraints. */
 	allowWebTools?: boolean;
+	/** If set, restricts agents to this subtree of the knowledge graph. */
+	scopeNodeId?: string;
 }
 
 function buildPrompt(messages: CliMessage[], newImages?: string[]): string {
@@ -774,6 +790,7 @@ async function prepareInvocation(options: CliChatOptions): Promise<{
 	const mcpConfigPath = writeMcpConfig(invocationDir, options.mcpServerPath, {
 		imagePaths: cliImagePaths.length ? cliImagePaths : undefined,
 		coordinator: options.coordinator,
+		scopeNodeId: options.scopeNodeId,
 	});
 	const prompt =
 		buildPrompt(options.messages, cliNewImagePaths) ||
