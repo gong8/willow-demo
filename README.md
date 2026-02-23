@@ -35,19 +35,23 @@ packages/
 
 ```sh
 git clone <repo-url> && cd willow-demo
-cp .env.example .env
 pnpm install
+cp packages/chat/.env.example packages/chat/.env
 pnpm build
+pnpm --filter @willow/chat db:push   # create the SQLite database
+pnpm dev
 ```
 
 ### Environment Variables
 
-| Variable | Default | Description |
-|---|---|---|
-| `DATABASE_URL` | `file:./data/willow.db` | Prisma SQLite database path (relative to `packages/chat`) |
-| `PORT` | `8787` | Hono server port |
-| `LLM_MODEL` | `claude-opus-4-6` | Claude model used for chat |
-| `WILLOW_GRAPH_PATH` | `~/.willow/graph.json` | Path to the knowledge graph file |
+Prisma requires a `packages/chat/.env` file with `DATABASE_URL`. The other variables are read from `process.env` at runtime and have sensible defaults — set them in your shell or a tool like [direnv](https://direnv.net/) if you need to override.
+
+| Variable | Default | Where | Description |
+|---|---|---|---|
+| `DATABASE_URL` | `file:./data/willow.db` | `packages/chat/.env` | Prisma SQLite path (relative to `packages/chat`) |
+| `PORT` | `8787` | shell env | Hono server port |
+| `LLM_MODEL` | `claude-opus-4-6` | shell env | Claude model used for chat |
+| `WILLOW_GRAPH_PATH` | `~/.willow/graph.json` | shell env | Path to the knowledge graph file |
 
 ## Development
 
