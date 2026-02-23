@@ -132,10 +132,6 @@ impl GraphStore {
         !self.pending_changes.is_empty()
     }
 
-    pub fn pending_changes(&self) -> &[Change] {
-        &self.pending_changes
-    }
-
     pub fn commit(&mut self, input: CommitInput) -> Result<crate::vcs::types::CommitHash, WillowError> {
         let repo = self.require_repo()?;
         let hash = repo.create_commit(&input, &self.pending_changes, &self.graph)?;
