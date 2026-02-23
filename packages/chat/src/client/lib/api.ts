@@ -117,6 +117,10 @@ export interface TreeNode {
 	childCount: number;
 }
 
+export function fetchNode(nodeId: string): Promise<TreeNode> {
+	return fetchJson(`/graph/node/${nodeId}`);
+}
+
 export function fetchNodeChildren(nodeId: string): Promise<TreeNode[]> {
 	return fetchJson(`/graph/children/${nodeId}`);
 }

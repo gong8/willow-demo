@@ -85,6 +85,28 @@ graphRoutes.get("/", (c) => {
 	}
 });
 
+// GET /node/:nodeId — single node info
+graphRoutes.get("/node/:nodeId", (c) => {
+	try {
+		const store = getStore();
+		const nodeId = c.req.param("nodeId");
+		const ctx = store.getContext(nodeId, 0);
+		const node = ctx.descendants.find((n) => n.id === nodeId);
+		if (!node) {
+			return c.json({ error: "Node not found" }, 404);
+		}
+		return c.json({
+			id: node.id,
+			content: node.content,
+			nodeType: node.nodeType,
+			childCount: node.children.length,
+		});
+	} catch (e: unknown) {
+		log.error("Failed to get node", { error: (e as Error).message });
+		return c.json({ error: (e as Error).message }, 404);
+	}
+});
+
 // GET /children/:nodeId — direct children (for scope picker)
 graphRoutes.get("/children/:nodeId", (c) => {
 	try {

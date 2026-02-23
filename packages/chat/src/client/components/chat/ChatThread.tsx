@@ -8,7 +8,11 @@ import { ChevronDown, Focus } from "lucide-react";
 import { useEffect, useMemo, useRef } from "react";
 import { useChatHistory } from "../../hooks/useChatHistory.js";
 import { useStreamReconnect } from "../../hooks/useStreamReconnect.js";
-import { type Conversation, fetchConversations } from "../../lib/api.js";
+import {
+	type Conversation,
+	fetchConversations,
+	fetchNode,
+} from "../../lib/api.js";
 import {
 	chatAttachmentAdapter,
 	createWillowChatAdapter,
@@ -79,6 +83,12 @@ export function ChatThread({
 		(c) => c.id === conversationId,
 	)?.scopeNodeId;
 
+	const { data: scopeNode } = useQuery({
+		queryKey: ["graph", "node", scopeNodeId],
+		queryFn: () => fetchNode(scopeNodeId!),
+		enabled: !!scopeNodeId,
+	});
+
 	const { reconnectStream, reconnectViewportRef } = useStreamReconnect(
 		conversationId,
 		adapterStreamingRef,
@@ -105,7 +115,7 @@ export function ChatThread({
 				{scopeNodeId && (
 					<div className="flex items-center gap-1.5 border-b border-border bg-primary/5 px-4 py-1.5 text-xs text-primary">
 						<Focus className="h-3 w-3" />
-						<span>Scoped to: {scopeNodeId}</span>
+						<span>Scoped to: {scopeNode?.content ?? scopeNodeId}</span>
 					</div>
 				)}
 				<ThreadPrimitive.Root className="relative flex min-h-0 flex-1 flex-col overflow-hidden">
